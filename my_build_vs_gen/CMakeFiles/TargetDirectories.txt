@@ -1,0 +1,3 @@
+C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/cuda_hello.dir
+C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/edit_cache.dir
+C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/rebuild_cache.dir
