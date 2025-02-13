@@ -1131,7 +1131,7 @@
 				}
 			],
 			"type" : "PATH",
-			"value" : "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/extras/CUPTI/include"
+			"value" : "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/include/../extras/CUPTI/include"
 		},
 		{
 			"name" : "CUDA_CUDART",
