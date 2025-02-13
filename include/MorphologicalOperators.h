@@ -1,5 +1,4 @@
 #pragma once
-#include <algorithm>    
 
 void opening(const unsigned char* input, unsigned char* output, int width, int height, int kernel_size);
 void closure(const unsigned char* input, unsigned char* output, int width, int height, int kernel_size);

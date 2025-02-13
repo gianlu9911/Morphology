@@ -1,9 +1,6 @@
 #pragma once
-#include <iostream>
-#include <opencv2/opencv.hpp>
 #include "MorphologicalOperators.h"
 #include "Utility.h"
-#include <vector>
 #include <chrono>
 
 void addLabel(cv::Mat& img, const std::string& label) {

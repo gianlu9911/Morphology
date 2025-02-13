@@ -1,6 +1,9 @@
 #include <iostream>
-#include <cuda_runtime.h>
 #include <fstream>
+#include <vector>
+#include <opencv2/opencv.hpp>
+#include <algorithm>    
+
 
 void saveExecutionTimeCSV(const std::string& filename, const std::string& resolution, 
                           double execution_time, const std::string& operation, 
@@ -20,6 +23,3 @@ void saveExecutionTimeCSV(const std::string& filename, const std::string& resolu
     file.close();
 }
 
-__global__ void my_kernel(){
-    printf("hi from kernel\n");
-}
