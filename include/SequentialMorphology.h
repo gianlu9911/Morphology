@@ -3,6 +3,7 @@
 #include "Utility.h"
 #include <chrono>
 
+// The function just add text for displying the images after applining the morphological operators
 void addLabel(cv::Mat& img, const std::string& label) {
     int font = cv::FONT_HERSHEY_SIMPLEX;
     double scale = 0.5;
@@ -32,7 +33,6 @@ int sequentialMorphology(std::string img_path, int kernel_size, cv::Size res) {
     cv::Mat tophat_image(height, width, CV_8UC1);
     cv::Mat blackhat_image(height, width, CV_8UC1);
 
-    // Apply operations
     erosion(image.data, eroded_image.data, width, height, kernel_size);
     dilation(image.data, dilated_image.data, width, height, kernel_size);
     opening(image.data, opened_image.data, width, height, kernel_size);
@@ -69,7 +69,6 @@ int sequentialMorphology(std::string img_path, int kernel_size, cv::Size res) {
     cv::hconcat(row2_images, row2);
     cv::vconcat(row1, row2, grid);
 
-    // Display the final grid
     cv::imshow("Morphological Operations", grid);
     cv::waitKey(0);
 
@@ -83,9 +82,9 @@ void sequentialTest(std::string img_path) {
 
     std::vector<int> kernel_sizes = {3, 5, 7};
     std::vector<cv::Size> resolutions = { 
-        cv::Size(256, 256), // Low resolution
-        cv::Size(512, 512), // Medium resolution
-        cv::Size(1024, 1024) // High resolution
+        cv::Size(256, 256), 
+        cv::Size(512, 512), 
+        cv::Size(1024, 1024) 
     };
     
     std::vector<std::string> operations = {"Erosion", "Dilation", "Opening", 
@@ -104,7 +103,6 @@ void sequentialTest(std::string img_path) {
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
 
-            // Save execution time for each operation
             for (const auto& op : operations) {
                 saveExecutionTimeCSV("results.csv", std::to_string(res.width) + "x" + std::to_string(res.height),
                                      duration.count(), op, "Sequential", kernel_size);
