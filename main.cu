@@ -24,7 +24,7 @@ __global__ void vhgw_dilation_row(float *d_input, float *d_output, int width, in
     shared_mem[sharedIdx] = d_input[row * width + col];
 
     if (tx < radius) {
-        shared_mem[sharedIdx - radius] = (col >= radius) ? d_input[row * width + col - radius] : d_input[row * width];
+        shared_mem[sharedIdx - radius] = (col >= radius) ? d_input[row * width + col - radius] : shared_mem[sharedIdx];
         shared_mem[sharedIdx + blockDim.x] = (col + blockDim.x < width) ? d_input[row * width + col + blockDim.x] : d_input[row * width + width - 1];
     }
 
@@ -71,7 +71,7 @@ __global__ void vhgw_dilation_col(float *d_input, float *d_output, int width, in
     d_output[row * width + col] = max_value;
 }
 
-void run_vhgw_dilation(float *h_input, float *h_output, int width, int height, int radius) {
+void run_vhgw_dilation(float *h_input, float *h_output, int width, int height, int radius, int block_size) {
     float *d_input, *d_intermediate, *d_output;
     size_t size = width * height * sizeof(float);
 
@@ -81,25 +81,50 @@ void run_vhgw_dilation(float *h_input, float *h_output, int width, int height, i
 
     CHECK_CUDA(cudaMemcpy(d_input, h_input, size, cudaMemcpyHostToDevice));
 
-    dim3 blockSize(32);
+    // Create CUDA events for timing
+    cudaEvent_t start, stop;
+    CHECK_CUDA(cudaEventCreate(&start));
+    CHECK_CUDA(cudaEventCreate(&stop));
+
+    CHECK_CUDA(cudaEventRecord(start, 0));  // Start timer
+
+    dim3 blockSize(block_size);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, height);
     size_t shared_mem_size = (blockSize.x + 2 * radius) * sizeof(float);
 
     vhgw_dilation_row<<<gridSize, blockSize, shared_mem_size>>>(d_input, d_intermediate, width, height, radius);
     CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaEventRecord(stop, 0));  // Stop timer
+    CHECK_CUDA(cudaEventSynchronize(stop));
 
-    dim3 blockSizeCol(1, 32);
+    float elapsedTimeRow;
+    CHECK_CUDA(cudaEventElapsedTime(&elapsedTimeRow, start, stop));  // Calculate elapsed time
+    printf("Row Dilation Kernel Execution Time: %f ms\n", elapsedTimeRow);
+
+    CHECK_CUDA(cudaEventRecord(start, 0));  // Start timer
+
+    dim3 blockSizeCol(1, block_size);
     dim3 gridSizeCol(width, (height + blockSizeCol.y - 1) / blockSizeCol.y);
     shared_mem_size = (blockSizeCol.y + 2 * radius) * sizeof(float);
 
     vhgw_dilation_col<<<gridSizeCol, blockSizeCol, shared_mem_size>>>(d_intermediate, d_output, width, height, radius);
     CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaEventRecord(stop, 0));  // Stop timer
+    CHECK_CUDA(cudaEventSynchronize(stop));
+
+    float elapsedTimeCol;
+    CHECK_CUDA(cudaEventElapsedTime(&elapsedTimeCol, start, stop));  // Calculate elapsed time
+    printf("Column Dilation Kernel Execution Time: %f ms\n", elapsedTimeCol);
 
     CHECK_CUDA(cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost));
 
     CHECK_CUDA(cudaFree(d_input));
     CHECK_CUDA(cudaFree(d_intermediate));
     CHECK_CUDA(cudaFree(d_output));
+     // Clean up CUDA events
+     CHECK_CUDA(cudaEventDestroy(start));
+     CHECK_CUDA(cudaEventDestroy(stop));
 }
 
 
@@ -130,7 +155,7 @@ int main() {
         }
     }
     
-    run_vhgw_dilation(h_input, h_output, width, height, radius);
+    run_vhgw_dilation(h_input, h_output, width, height, radius, 256);
     
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
