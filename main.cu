@@ -1,176 +1,167 @@
+#include <opencv2/opencv.hpp>
 #include <cuda_runtime.h>
 #include <iostream>
-#include <cstdlib>
-#include <opencv2/opencv.hpp>
 
-#define CHECK_CUDA(call) { \
+#define CUDA_CHECK(call) { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
-        std::cerr << "CUDA Error: " << cudaGetErrorString(err) << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::cerr << "CUDA error in " << __FILE__ << " at line " << __LINE__ << ": " << cudaGetErrorString(err) << std::endl; \
         exit(EXIT_FAILURE); \
     } \
 }
 
-__global__ void vhgw_dilation_row(float *d_input, float *d_output, int width, int height, int radius) {
-    extern __shared__ float shared_mem[];
-    int tx = threadIdx.x;
-    int col = blockIdx.x * blockDim.x + tx;
-    int row = blockIdx.y;
+// Kernel to divide the image into tiles with overlap
+__global__ void divideIntoTilesWithOverlap(uchar* image, int* tiles, int imageWidth, int imageHeight, int N, int p) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int p2_minus_1 = 2 * p - 1;  // Total window size (p*2 - 1)
+    int overlap = (p - 1) / 2;    // Apron size for overlap
 
-    if (col >= width || row >= height) return;
-
-    // Load data into shared memory with boundary checks
-    int sharedIdx = tx + radius;
-    shared_mem[sharedIdx] = d_input[row * width + col];
-
-    if (tx < radius) {
-        shared_mem[sharedIdx - radius] = (col >= radius) ? d_input[row * width + col - radius] : d_input[row * width];
-        shared_mem[sharedIdx + blockDim.x] = (col + blockDim.x < width) ? d_input[row * width + col + blockDim.x] : d_input[row * width + width - 1];
+    if (idx < imageHeight) {
+        for (int col = overlap; col < imageWidth - overlap; ++col) {
+            // Create a window of size p*2 - 1 (dilation window)
+            for (int i = 0; i < p2_minus_1; ++i) {
+                // Copy data into the tiles array with overlap
+                int tileIdx = (idx * imageWidth + col) * p2_minus_1 + i;
+                tiles[tileIdx] = image[(idx * imageWidth) + (col + i - overlap)];
+            }
+        }
     }
-
-    __syncthreads();
-
-    // Compute max using boundary checks
-    float max_value = shared_mem[sharedIdx];
-    for (int i = 1; i <= radius; i++) {
-        if (sharedIdx - i >= 0)
-            max_value = max(max_value, shared_mem[sharedIdx - i]);
-        if (sharedIdx + i < blockDim.x + 2 * radius)
-            max_value = max(max_value, shared_mem[sharedIdx + i]);
-    }
-
-    d_output[row * width + col] = max_value;
 }
 
+// Kernel to compute the max arrays (suffix and prefix max)
+__global__ void computeMaxArrays(int* tiles, int* s, int* r, int imageWidth, int imageHeight, int N, int p) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int p2_minus_1 = 2 * p - 1;  // Window size (p * 2 - 1)
 
+    if (idx < imageHeight * imageWidth) {
+        int row = idx / imageWidth;
+        int col = idx % imageWidth;
 
-__global__ void vhgw_dilation_col(float *d_input, float *d_output, int width, int height, int radius) {
-    extern __shared__ float shared_mem[];
-    int ty = threadIdx.y;
-    int row = blockIdx.y * blockDim.y + ty;
-    int col = blockIdx.x;
+        if (col >= (p - 1) && col < (imageWidth - (p - 1))) {
+            // Window indices: [col - (p-1), col + (p-1)]
+            // We need to fill s and r arrays for the window
 
-    if (row >= height || col >= width) return;
+            // Suffix max array (s) for pixels 0 to p-1 in window
+            for (int i = 0; i < p; i++) {
+                s[idx * p + i] = tiles[(row * imageWidth + col) * p + i];
+            }
+            for (int i = p - 2; i >= 0; --i) {
+                s[idx * p + i] = max(s[idx * p + i], s[idx * p + i + 1]);
+            }
 
-    int sharedIdx = ty + radius;
-    shared_mem[sharedIdx] = d_input[row * width + col];
-
-    if (ty < radius) {
-        shared_mem[sharedIdx - radius] = (row >= radius) ? d_input[(row - radius) * width + col] : d_input[col];
-        shared_mem[sharedIdx + blockDim.y] = (row + blockDim.y < height) ? d_input[(row + blockDim.y) * width + col] : d_input[(height - 1) * width + col];
+            // Prefix max array (r) for pixels p-1 to p*2-1 in window
+            for (int i = 0; i < p; i++) {
+                r[idx * p + i] = tiles[(row * imageWidth + col) * p + (p-1+i)];
+            }
+            for (int i = 1; i < p; i++) {
+                r[idx * p + i] = max(r[idx * p + i], r[idx * p + i - 1]);
+            }
+        }
     }
-
-    __syncthreads();
-
-    float max_value = shared_mem[sharedIdx];
-    for (int i = 1; i <= radius; i++) {
-        if (sharedIdx - i >= 0)
-            max_value = max(max_value, shared_mem[sharedIdx - i]);
-        if (sharedIdx + i < blockDim.y + 2 * radius)
-            max_value = max(max_value, shared_mem[sharedIdx + i]);
-    }
-
-    d_output[row * width + col] = max_value;
 }
 
-void run_vhgw_dilation(float *h_input, float *h_output, int width, int height, int radius, int block_size) {
-    float *d_input, *d_intermediate, *d_output;
-    size_t size = width * height * sizeof(float);
+// Kernel to compute the dilation result
+__global__ void computeDilationResult(int* s, int* r, uchar* result, int imageWidth, int imageHeight, int p) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
-    CHECK_CUDA(cudaMalloc(&d_input, size));
-    CHECK_CUDA(cudaMalloc(&d_intermediate, size));
-    CHECK_CUDA(cudaMalloc(&d_output, size));
+    if (idx < imageHeight * imageWidth) {
+        int row = idx / imageWidth;
+        int col = idx % imageWidth;
 
-    CHECK_CUDA(cudaMemcpy(d_input, h_input, size, cudaMemcpyHostToDevice));
+        if (col >= (p - 1) / 2 && col < (imageWidth - (p - 1) / 2)) {
+            // We are within the valid region for dilation calculation
 
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    CHECK_CUDA(cudaEventCreate(&start));
-    CHECK_CUDA(cudaEventCreate(&stop));
+            // Calculate the index for the suffix and prefix max arrays
+            int sIndex = idx * p + (col - (p - 1) / 2);
+            int rIndex = idx * p + (col + (p - 1) / 2);
 
-    CHECK_CUDA(cudaEventRecord(start, 0));  // Start timer
-
-    dim3 blockSize(block_size);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, height);
-    size_t shared_mem_size = (blockSize.x + 2 * radius) * sizeof(float);
-
-    vhgw_dilation_row<<<gridSize, blockSize, shared_mem_size>>>(d_input, d_intermediate, width, height, radius);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    CHECK_CUDA(cudaEventRecord(stop, 0));  // Stop timer
-    CHECK_CUDA(cudaEventSynchronize(stop));
-
-    float elapsedTimeRow;
-    CHECK_CUDA(cudaEventElapsedTime(&elapsedTimeRow, start, stop));  // Calculate elapsed time
-    printf("Row Dilation Kernel Execution Time: %f ms\n", elapsedTimeRow);
-
-    CHECK_CUDA(cudaEventRecord(start, 0));  // Start timer
-
-    dim3 blockSizeCol(1, block_size);
-    dim3 gridSizeCol(width, (height + blockSizeCol.y - 1) / blockSizeCol.y);
-    shared_mem_size = (blockSizeCol.y + 2 * radius) * sizeof(float);
-
-    vhgw_dilation_col<<<gridSizeCol, blockSizeCol, shared_mem_size>>>(d_intermediate, d_output, width, height, radius);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    CHECK_CUDA(cudaDeviceSynchronize());
-    CHECK_CUDA(cudaEventRecord(stop, 0));  // Stop timer
-    CHECK_CUDA(cudaEventSynchronize(stop));
-
-    float elapsedTimeCol;
-    CHECK_CUDA(cudaEventElapsedTime(&elapsedTimeCol, start, stop));  // Calculate elapsed time
-    printf("Column Dilation Kernel Execution Time: %f ms\n", elapsedTimeCol);
-
-    CHECK_CUDA(cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost));
-
-    CHECK_CUDA(cudaFree(d_input));
-    CHECK_CUDA(cudaFree(d_intermediate));
-    CHECK_CUDA(cudaFree(d_output));
-     // Clean up CUDA events
-     CHECK_CUDA(cudaEventDestroy(start));
-     CHECK_CUDA(cudaEventDestroy(stop));
+            // Perform dilation computation: result[j] = max(s[j-(p-1)/2], r[j+(p-1)/2])
+            result[idx] = max(s[sIndex], r[rIndex]);
+        }
+    }
 }
-
 
 int main() {
-    std::string input_path = "../imgs/lena.jpg";
-    std::string output_path = "../lena_dilated.jpg";
-    
+    // Read the image using OpenCV
+    std::string imagePath = "../imgs/lena.jpg";
+    cv::Mat h_image = cv::imread(imagePath, cv::IMREAD_GRAYSCALE); // Read as grayscale for simplicity
 
-    int radius = 1;
-    
-    cv::Mat image = cv::imread(input_path, cv::IMREAD_GRAYSCALE);
-    if (image.empty()) {
-        std::cerr << "Error: Could not open or find the image!" << std::endl;
+    if (h_image.empty()) {
+        std::cerr << "Failed to load image from path: " << imagePath << std::endl;
         return -1;
     }
-    
-    int width = image.cols;
-    int height = image.rows;
-    
-    cv::Mat output_image(height, width, CV_8UC1);
-    
-    float *h_input = new float[width * height];
-    float *h_output = new float[width * height];
-    
-    for (int i = 0; i < height; i++) {
-        for (int j = 0; j < width; j++) {
-            h_input[i * width + j] = static_cast<float>(image.at<uchar>(i, j));
+
+    // Get image dimensions
+    int imageWidth = h_image.cols;
+    int imageHeight = h_image.rows;
+
+    std::cout << "Image dimensions: " << imageWidth << "x" << imageHeight << std::endl;
+
+    // Parameters for the structuring element (example, N=3 means p=7)
+    int N = 3;
+    int p = 2 * N + 1;
+
+    // Allocate device memory for image and tiles
+    uchar* d_image;
+    int* d_tiles;
+    int* d_s;
+    int* d_r;
+    uchar* d_result;
+    uchar* h_image_data = new uchar[imageWidth * imageHeight];  // Host memory for image
+    int* h_tiles = new int[imageHeight * imageWidth * (2 * p - 1)];  // Host memory for tiles (int)
+    int* h_s = new int[imageHeight * imageWidth * p]; // Host memory for suffix max (int)
+    int* h_r = new int[imageHeight * imageWidth * p]; // Host memory for prefix max (int)
+    uchar* h_result = new uchar[imageHeight * imageWidth]; // Host memory for final dilation result
+
+    // Convert the image to a 1D array and copy to device
+    for (int i = 0; i < imageHeight; ++i) {
+        for (int j = 0; j < imageWidth; ++j) {
+            h_image_data[i * imageWidth + j] = h_image.at<uchar>(i, j);
         }
     }
-    
-    run_vhgw_dilation(h_input, h_output, width, height, radius, 512);
-    
-    for (int i = 0; i < height; i++) {
-        for (int j = 0; j < width; j++) {
-            output_image.at<uchar>(i, j) = static_cast<uchar>(h_output[i * width + j]);
-        }
-    }
-    
-    cv::imwrite(output_path, output_image);
-    
-    delete[] h_input;
-    delete[] h_output;
-    
-    std::cout << "Dilation complete. Output saved to " << output_path << std::endl;
-    
+
+    // Allocate device memory
+    CUDA_CHECK(cudaMalloc(&d_image, imageWidth * imageHeight * sizeof(uchar)));
+    CUDA_CHECK(cudaMalloc(&d_tiles, imageHeight * imageWidth * (2 * p - 1) * sizeof(int)));  // Changed to int
+    CUDA_CHECK(cudaMalloc(&d_s, imageHeight * imageWidth * p * sizeof(int)));  // Changed to int
+    CUDA_CHECK(cudaMalloc(&d_r, imageHeight * imageWidth * p * sizeof(int)));  // Changed to int
+    CUDA_CHECK(cudaMalloc(&d_result, imageHeight * imageWidth * sizeof(uchar)));
+
+    // Copy image to device
+    CUDA_CHECK(cudaMemcpy(d_image, h_image_data, imageWidth * imageHeight * sizeof(uchar), cudaMemcpyHostToDevice));
+
+    // Launch kernel to divide into tiles with overlap
+    int blockSize = 256;
+    int numBlocks = (imageHeight + blockSize - 1) / blockSize;
+    divideIntoTilesWithOverlap<<<numBlocks, blockSize>>>(d_image, d_tiles, imageWidth, imageHeight, N, p);
+    CUDA_CHECK(cudaGetLastError());  // Check for kernel errors
+
+    // Launch kernel to compute the max arrays
+    computeMaxArrays<<<numBlocks, blockSize>>>(d_tiles, d_s, d_r, imageWidth, imageHeight, N, p);
+    CUDA_CHECK(cudaGetLastError());  // Check for kernel errors
+
+    // Launch kernel to compute the final dilation result
+    computeDilationResult<<<numBlocks, blockSize>>>(d_s, d_r, d_result, imageWidth, imageHeight, p);
+    CUDA_CHECK(cudaGetLastError());  // Check for kernel errors
+
+    // Copy the results back to host
+    CUDA_CHECK(cudaMemcpy(h_result, d_result, imageHeight * imageWidth * sizeof(uchar), cudaMemcpyDeviceToHost));
+
+    // Save the result to a new image
+    cv::Mat result_image(imageHeight, imageWidth, CV_8UC1, h_result);
+    cv::imwrite("../imgs/lena_dilated.jpg", result_image);
+
+    // Free memory
+    CUDA_CHECK(cudaFree(d_image));
+    CUDA_CHECK(cudaFree(d_tiles));
+    CUDA_CHECK(cudaFree(d_s));
+    CUDA_CHECK(cudaFree(d_r));
+    CUDA_CHECK(cudaFree(d_result));
+    delete[] h_image_data;
+    delete[] h_tiles;
+    delete[] h_s;
+    delete[] h_r;
+    delete[] h_result;
+
     return 0;
 }
