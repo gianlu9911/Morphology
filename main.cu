@@ -24,7 +24,7 @@ __global__ void vhgw_dilation_row(float *d_input, float *d_output, int width, in
     shared_mem[sharedIdx] = d_input[row * width + col];
 
     if (tx < radius) {
-        shared_mem[sharedIdx - radius] = (col >= radius) ? d_input[row * width + col - radius] : shared_mem[sharedIdx];
+        shared_mem[sharedIdx - radius] = (col >= radius) ? d_input[row * width + col - radius] : d_input[row * width];
         shared_mem[sharedIdx + blockDim.x] = (col + blockDim.x < width) ? d_input[row * width + col + blockDim.x] : d_input[row * width + width - 1];
     }
 
@@ -41,6 +41,8 @@ __global__ void vhgw_dilation_row(float *d_input, float *d_output, int width, in
 
     d_output[row * width + col] = max_value;
 }
+
+
 
 __global__ void vhgw_dilation_col(float *d_input, float *d_output, int width, int height, int radius) {
     extern __shared__ float shared_mem[];
@@ -155,7 +157,7 @@ int main() {
         }
     }
     
-    run_vhgw_dilation(h_input, h_output, width, height, radius, 256);
+    run_vhgw_dilation(h_input, h_output, width, height, radius, 512);
     
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
