@@ -420,8 +420,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-yb13z3"
-      binary: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-yb13z3"
+      source: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-ub2c7r"
+      binary: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-ub2c7r"
     cmakeVariables:
       CMAKE_CUDA_ARCHITECTURES: "52"
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
@@ -432,11 +432,11 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-yb13z3'
+        Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-ub2c7r'
         
-        Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_63b7b
-        [1/2] C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS /EHsc  /Ob0 /Od /RTC1 -MDd -Zi /showIncludes /FoCMakeFiles\\cmTC_63b7b.dir\\CMakeCXXCompilerABI.cpp.obj /FdCMakeFiles\\cmTC_63b7b.dir\\ /FS -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCXXCompilerABI.cpp"
-        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --msvc-ver=1942 --intdir=CMakeFiles\\cmTC_63b7b.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_63b7b.dir\\CMakeCXXCompilerABI.cpp.obj  /out:cmTC_63b7b.exe /implib:cmTC_63b7b.lib /pdb:cmTC_63b7b.pdb /version:0.0 /machine:x64  /debug /INCREMENTAL /subsystem:console  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+        Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_cddbb
+        [1/2] C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS /EHsc  /Ob0 /Od /RTC1 -MDd -Zi /showIncludes /FoCMakeFiles\\cmTC_cddbb.dir\\CMakeCXXCompilerABI.cpp.obj /FdCMakeFiles\\cmTC_cddbb.dir\\ /FS -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCXXCompilerABI.cpp"
+        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --msvc-ver=1942 --intdir=CMakeFiles\\cmTC_cddbb.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_cddbb.dir\\CMakeCXXCompilerABI.cpp.obj  /out:cmTC_cddbb.exe /implib:cmTC_cddbb.lib /pdb:cmTC_cddbb.pdb /version:0.0 /machine:x64  /debug /INCREMENTAL /subsystem:console  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
         
       exitCode: 0
   -
@@ -476,8 +476,8 @@ events:
     checks:
       - "Detecting CUDA compiler ABI info"
     directories:
-      source: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-8vuzse"
-      binary: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-8vuzse"
+      source: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-t0hnby"
+      binary: "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-t0hnby"
     cmakeVariables:
       CMAKE_CUDA_ARCHITECTURES: "52"
       CMAKE_CUDA_FLAGS: "-D_WINDOWS -Xcompiler=\" /EHsc\""
@@ -488,19 +488,19 @@ events:
       variable: "CMAKE_CUDA_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-8vuzse'
+        Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-t0hnby'
         
-        Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_522fa
-        [1/2] C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler   -D_WINDOWS -Xcompiler=" /EHsc"  -Xcompiler=" -Ob0 -Od /RTC1" "--generate-code=arch=compute_52,code=[compute_52,sm_52]" -Xcompiler=-MDd -Xcompiler=-Zi   -Xcompiler=-v -MD -MT CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj -MF CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj.d -x cu -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCUDACompilerABI.cu" -o CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj -Xcompiler=-FdCMakeFiles\\cmTC_522fa.dir\\,-FS
+        Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_60c63
+        [1/2] C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler   -D_WINDOWS -Xcompiler=" /EHsc"  -Xcompiler=" -Ob0 -Od /RTC1" "--generate-code=arch=compute_52,code=[compute_52,sm_52]" -Xcompiler=-MDd -Xcompiler=-Zi   -Xcompiler=-v -MD -MT CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj -MF CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj.d -x cu -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCUDACompilerABI.cu" -o CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj -Xcompiler=-FdCMakeFiles\\cmTC_60c63.dir\\,-FS
         cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata
         CMakeCUDACompilerABI.cu
         cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata
         CMakeCUDACompilerABI.cu
         CMakeCUDACompilerABI.cu
         cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata
-        tmpxft_00002290_00000000-10_CMakeCUDACompilerABI.cudafe1.cpp
+        tmpxft_000042b4_00000000-10_CMakeCUDACompilerABI.cudafe1.cpp
         C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCompilerCUDAArch.h(10): warning C4305: 'return': troncamento da 'int' a 'bool'\x0d
-        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_522fa.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj  /out:cmTC_522fa.exe /implib:cmTC_522fa.lib /pdb:cmTC_522fa.pdb /version:0.0 /machine:x64 -v /debug /INCREMENTAL  cudadevrt.lib  cudart_static.lib -LIBPATH:"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/lib/x64" && cd ."
+        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_60c63.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj  /out:cmTC_60c63.exe /implib:cmTC_60c63.lib /pdb:cmTC_60c63.pdb /version:0.0 /machine:x64 -v /debug /INCREMENTAL  cudadevrt.lib  cudart_static.lib -LIBPATH:"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/lib/x64" && cd ."
         
       exitCode: 0
   -
@@ -524,19 +524,19 @@ events:
       Parsed CUDA implicit link information:
         link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
         linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
-        ignore line: [Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-8vuzse']
+        ignore line: [Change Dir: 'C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen/CMakeFiles/CMakeScratch/TryCompile-t0hnby']
         ignore line: []
-        ignore line: [Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_522fa]
-        ignore line: [[1/2] C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler   -D_WINDOWS -Xcompiler=" /EHsc"  -Xcompiler=" -Ob0 -Od /RTC1" "--generate-code=arch=compute_52 code=[compute_52 sm_52]" -Xcompiler=-MDd -Xcompiler=-Zi   -Xcompiler=-v -MD -MT CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj -MF CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj.d -x cu -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCUDACompilerABI.cu" -o CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj -Xcompiler=-FdCMakeFiles\\cmTC_522fa.dir\\ -FS]
+        ignore line: [Run Build Command(s): C:/PROGRA~1/Ninja/ninja.exe -v cmTC_60c63]
+        ignore line: [[1/2] C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler   -D_WINDOWS -Xcompiler=" /EHsc"  -Xcompiler=" -Ob0 -Od /RTC1" "--generate-code=arch=compute_52 code=[compute_52 sm_52]" -Xcompiler=-MDd -Xcompiler=-Zi   -Xcompiler=-v -MD -MT CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj -MF CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj.d -x cu -c "C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCUDACompilerABI.cu" -o CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj -Xcompiler=-FdCMakeFiles\\cmTC_60c63.dir\\ -FS]
         ignore line: [cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata]
         ignore line: [CMakeCUDACompilerABI.cu]
         ignore line: [cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata]
         ignore line: [CMakeCUDACompilerABI.cu]
         ignore line: [CMakeCUDACompilerABI.cu]
         ignore line: [cl : warning della riga di comando D9002 : l'opzione sconosciuta '-v' verrà ignorata]
-        ignore line: [tmpxft_00002290_00000000-10_CMakeCUDACompilerABI.cudafe1.cpp]
+        ignore line: [tmpxft_000042b4_00000000-10_CMakeCUDACompilerABI.cudafe1.cpp]
         ignore line: [C:\\Program Files\\CMake\\share\\cmake-3.31\\Modules\\CMakeCompilerCUDAArch.h(10): warning C4305: 'return': troncamento da 'int' a 'bool'\x0d]
-        ignore line: [[2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_522fa.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_522fa.dir\\CMakeCUDACompilerABI.cu.obj  /out:cmTC_522fa.exe /implib:cmTC_522fa.lib /pdb:cmTC_522fa.pdb /version:0.0 /machine:x64 -v /debug /INCREMENTAL  cudadevrt.lib  cudart_static.lib -LIBPATH:"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/lib/x64" && cd ."]
+        ignore line: [[2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_60c63.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x86\\mt.exe --manifests  -- C:\\PROGRA~1\\MICROS~1\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1442~1.344\\bin\\Hostx86\\x64\\link.exe /nologo CMakeFiles\\cmTC_60c63.dir\\CMakeCUDACompilerABI.cu.obj  /out:cmTC_60c63.exe /implib:cmTC_60c63.lib /pdb:cmTC_60c63.pdb /version:0.0 /machine:x64 -v /debug /INCREMENTAL  cudadevrt.lib  cudart_static.lib -LIBPATH:"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/lib/x64" && cd ."]
         ignore line: []
         ignore line: []
         linker tool for 'CUDA': C:/PROGRA~1/MICROS~1/2022/COMMUN~1/VC/Tools/MSVC/1442~1.344/bin/Hostx86/x64/link.exe

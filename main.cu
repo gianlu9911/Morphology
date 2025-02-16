@@ -2,7 +2,7 @@
 #include <cmath>
 #include <opencv2/opencv.hpp>
 #include <cuda_runtime.h>
-
+#include "SequentialMorphology.h"
 // ---------------------------------------------------------------------
 // Step 1: Extract window from a tile of a row from the image.
 // Each tile is taken from the row starting at tileStart, and extended with
@@ -105,18 +105,25 @@ __global__ void dilationKernel(const int* d_s, const int* d_r, int* d_out,
     }
 }
 
-// ---------------------------------------------------------------------
-// Main: Load an image, run the three steps (for horizontal dilation),
-// and reassemble and save the output.
-int main() {
+
+enum OperationType {
+    DILATION,
+    // You can add other operation types here as needed (e.g., erosion, opening, closing).
+};
+
+
+void executeOperation(OperationType operationType, const std::string& operationName, int p) {
     // 1. Load the input image (grayscale) using OpenCV.
     cv::Mat inImage = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
     if (inImage.empty()) {
         std::cerr << "Error: cannot load image ../imgs/lena.jpg" << std::endl;
-        return -1;
+        return;
     }
+
+    // Get the width and height of the image directly from the loaded image
     int width = inImage.cols;
     int height = inImage.rows;
+
     std::cout << "Loaded image: " << width << " x " << height << std::endl;
 
     // 2. Convert the image to 32-bit int (our kernels operate on int).
@@ -124,20 +131,16 @@ int main() {
     inImage.convertTo(inImageInt, CV_32S);
 
     // 3. Set the structural element size.
-    int p = 3;  // Must be odd; you can adjust this (e.g., 5, 7, etc.)
     int apron = (p - 1) / 2;
     int windowSize = 2 * p - 1;
-    // We'll process each row in tiles of width p.
     int numTiles = (width + p - 1) / p; // ceiling division
-    // The horizontally dilated image (per row) will be stored tile by tile.
-    // Its effective width is: numTiles * p (it may be slightly wider than original).
     int outWidth = numTiles * p;
 
     // 4. Allocate device memory.
     size_t imageSize = width * height * sizeof(int);
-    size_t outTileSize = height * numTiles * p * sizeof(int);      // for dilation result per tile
+    size_t outTileSize = height * numTiles * p * sizeof(int);
     size_t windowBufferSize = height * numTiles * windowSize * sizeof(int);
-    size_t scanBufferSize = height * numTiles * p * sizeof(int);     // for each of s and r
+    size_t scanBufferSize = height * numTiles * p * sizeof(int);
 
     int *d_in = nullptr, *d_windows = nullptr;
     int *d_s = nullptr, *d_r = nullptr, *d_out = nullptr;
@@ -150,63 +153,90 @@ int main() {
     // 5. Copy input image data to device.
     cudaMemcpy(d_in, inImageInt.ptr<int>(), imageSize, cudaMemcpyHostToDevice);
 
-    // 6. Launch Step 1: Extract windows for each tile of each row.
-    //    Grid dimensions: (numTiles, height)
-    dim3 gridExtract(numTiles, height);
-    int blockExtract = windowSize; // one thread per window element
-    extractWindowKernel<<<gridExtract, blockExtract>>>(d_in, d_windows, width, p, numTiles);
-    cudaDeviceSynchronize();
+    // Start CUDA timer
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
 
-    // 7. Launch Step 2: Compute prefix and suffix max arrays for each tile.
-    //    Grid dimensions: (numTiles, height), 2 threads per block.
-    dim3 gridScan(numTiles, height);
-    int blockScan = 2;
-    size_t sharedMemSize = 2 * p * sizeof(int);
-    scanKernel<<<gridScan, blockScan, sharedMemSize>>>(d_windows, d_s, d_r, p, numTiles);
-    cudaDeviceSynchronize();
+    // 6. Execute the selected operation.
+    if (operationType == DILATION) {
+        // Dilation Step 1: Extract windows for each tile of each row.
+        dim3 gridExtract(numTiles, height);
+        int blockExtract = windowSize;
+        extractWindowKernel<<<gridExtract, blockExtract>>>(d_in, d_windows, width, p, numTiles);
+        cudaDeviceSynchronize();
 
-    // 8. Launch Step 3: Compute dilation per tile.
-    //    Grid dimensions: (numTiles, height), p threads per block.
-    dim3 gridDilation(numTiles, height);
-    int blockDilation = p;
-    dilationKernel<<<gridDilation, blockDilation>>>(d_s, d_r, d_out, p, numTiles);
-    cudaDeviceSynchronize();
+        // Dilation Step 2: Compute prefix and suffix max arrays for each tile.
+        dim3 gridScan(numTiles, height);
+        int blockScan = 2;
+        size_t sharedMemSize = 2 * p * sizeof(int);
+        scanKernel<<<gridScan, blockScan, sharedMemSize>>>(d_windows, d_s, d_r, p, numTiles);
+        cudaDeviceSynchronize();
 
-    // 9. Copy the dilation (horizontal pass) result back to host.
-    //     The result is stored tile-by-tile in a buffer of size: (height * numTiles * p)
+        // Dilation Step 3: Compute dilation per tile.
+        dim3 gridDilation(numTiles, height);
+        int blockDilation = p;
+        dilationKernel<<<gridDilation, blockDilation>>>(d_s, d_r, d_out, p, numTiles);
+        cudaDeviceSynchronize();
+    }
+
+    // 7. Copy the result back to host.
     int* h_outTiles = new int[height * numTiles * p];
     cudaMemcpy(h_outTiles, d_out, outTileSize, cudaMemcpyDeviceToHost);
 
-    // 10. Reassemble the output row from the tile results.
-    //     Our intermediate output has width = numTiles * p.
+    // 8. Reassemble the output row from the tile results.
     cv::Mat outImageInt(height, outWidth, CV_32S);
     for (int r = 0; r < height; r++) {
         for (int t = 0; t < numTiles; t++) {
             for (int i = 0; i < p; i++) {
                 int col = t * p + i;
-                // If the reassembled column exceeds the original width, clamp it.
-                if(col < width)
+                if (col < width) {
                     outImageInt.at<int>(r, col) = h_outTiles[(r * numTiles + t) * p + i];
+                }
             }
         }
     }
 
-    // 11. Convert the result to 8-bit and save.
+    // 9. Convert the result to 8-bit and save.
     cv::Mat outImage;
     outImageInt.convertTo(outImage, CV_8U);
     if (!cv::imwrite("../output.jpg", outImage)) {
         std::cerr << "Error: cannot save output image to ../output.jpg" << std::endl;
-        return -1;
+        return;
     }
-    std::cout << "Dilation completed. Output saved to ../output.jpg" << std::endl;
+    std::cout << "Operation completed. Output saved to ../output.jpg" << std::endl;
 
-    // 12. Cleanup.
+    // Stop CUDA timer
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float elapsedTime;
+    cudaEventElapsedTime(&elapsedTime, start, stop);
+    std::cout << "Total execution time: " << elapsedTime << " ms." << std::endl;
+
+    // Save the execution time to CSV
+    saveExecutionTimeCSV("../execution_times.csv", "Resolution: " + std::to_string(width) + "x" + std::to_string(height),
+                         elapsedTime / 1000.0, operationName, "CUDA", p);
+
+    // 10. Cleanup.
     delete[] h_outTiles;
     cudaFree(d_in);
     cudaFree(d_windows);
     cudaFree(d_s);
     cudaFree(d_r);
     cudaFree(d_out);
+
+    // Destroy the CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+}
+
+int main() {
+    // sequentialTest("../imgs/lena.jpg");
+    int p = 3;  // Set your kernel size (structural element size).
+
+    // Call the function to execute the dilation operation without passing width and height
+    executeOperation(DILATION, "Dilation", p);
 
     return 0;
 }

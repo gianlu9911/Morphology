@@ -19,7 +19,7 @@ void saveExecutionTimeCSV(const std::string& filename, const std::string& resolu
     }
     
     // Write data row
-    file << resolution << "," << execution_time << "," << operation << "," << version << kernel_size << "\n";
+    file << resolution << "," << execution_time << "," << operation << "," << version << "," << kernel_size << "\n";
     file.close();
 }
 

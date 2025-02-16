@@ -1,0 +1,2 @@
+Resolution,Execution Time (s),Operation,Version,Kernel Size
+Resolution: 256x256,0.00187936,Dilation,CUDA,3
