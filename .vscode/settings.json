@@ -1,5 +1,25 @@
 {
     "files.associations": {
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "array": "cpp",
+        "deque": "cpp",
+        "filesystem": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "vector": "cpp",
+        "xhash": "cpp",
+        "xlocinfo": "cpp",
+        "xstring": "cpp",
+        "xtree": "cpp",
+        "xutility": "cpp",
+        "__node_handle": "cpp",
+        "__split_buffer": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "string": "cpp",
+        "string_view": "cpp",
+        "unordered_map": "cpp"
     }
 }

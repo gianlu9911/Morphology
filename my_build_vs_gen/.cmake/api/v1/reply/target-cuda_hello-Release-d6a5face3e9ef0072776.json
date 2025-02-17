@@ -29,19 +29,19 @@
 			{
 				"command" : 0,
 				"file" : 0,
-				"line" : 13,
+				"line" : 23,
 				"parent" : 0
 			},
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 25,
+				"line" : 35,
 				"parent" : 0
 			},
 			{
 				"command" : 2,
 				"file" : 0,
-				"line" : 8,
+				"line" : 19,
 				"parent" : 0
 			}
 		]
@@ -52,7 +52,7 @@
 			"compileCommandFragments" : 
 			[
 				{
-					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -std=c++17 -arch=native -Xcompiler=-MD"
+					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\"  -O3 --use_fast_math -std=c++17 -arch=native -Xcompiler=-MD"
 				}
 			],
 			"includes" : 
@@ -88,7 +88,7 @@
 		"commandFragments" : 
 		[
 			{
-				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -arch=native -Xcompiler=-MD",
+				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\"  -O3 --use_fast_math -arch=native -Xcompiler=-MD",
 				"role" : "flags"
 			},
 			{
