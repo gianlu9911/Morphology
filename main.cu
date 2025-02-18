@@ -1,9 +1,8 @@
-#include "SequentialMorphology.h"
 #include "ParallelMorphology.cuh"
 
 int main() {
-    
-    std::string imagePath = "../imgs/lena_4k.jpg";
+    std::string imagePath = "../imgs/lena.jpg";
     parallelTest(imagePath);
+    // sequentialTest(imagePath);
     return 0;
 }
