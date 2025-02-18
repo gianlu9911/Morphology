@@ -2,7 +2,8 @@
 #include "ParallelMorphology.cuh"
 
 int main() {
-    // sequentialTest("../imgs/lena_4k.jpg");
-    parallelTest("../imgs/lena_4k.jpg");
+    
+    std::string imagePath = "../imgs/lena_4k.jpg";
+    parallelTest(imagePath);
     return 0;
 }
