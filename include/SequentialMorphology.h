@@ -104,7 +104,7 @@ void sequentialTest(std::string img_path) {
             std::chrono::duration<double> duration = end - start;
 
             for (const auto& op : operations) {
-                saveExecutionTimeCSV("results.csv", std::to_string(res.width) + "x" + std::to_string(res.height),
+                saveExecutionTimeCSV("../results.csv", std::to_string(res.width) + "x" + std::to_string(res.height),
                                      duration.count(), op, "Sequential", kernel_size);
             }
 
