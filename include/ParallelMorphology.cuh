@@ -208,3 +208,6 @@ int parallelTest(std::string path) {
     cudaEventDestroy(stop);
     return 0;
 }
+
+
+

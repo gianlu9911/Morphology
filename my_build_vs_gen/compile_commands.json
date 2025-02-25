@@ -1,7 +1,7 @@
 [
 {
   "directory": "C:/Users/calli/Desktop/cuda_hello_word/my_build_vs_gen",
-  "command": "C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler -IC:\\Users\\calli\\Desktop\\cuda_hello_word\\include -isystem \"C:\\Program Files\\opencv\\build\\include\" -D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -std=c++17 -arch=native -Xcompiler=-MD -x cu -rdc=true -c C:\\Users\\calli\\Desktop\\cuda_hello_word\\main.cu -o CMakeFiles\\cuda_hello.dir\\main.cu.obj -Xcompiler=-FdCMakeFiles\\cuda_hello.dir\\,-FS",
+  "command": "C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.4\\bin\\nvcc.exe -forward-unknown-to-host-compiler -I\"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\include\" -IC:\\Users\\calli\\Desktop\\cuda_hello_word\\include -isystem \"C:\\Program Files\\opencv\\build\\include\" -D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -lineinfo -Xptxas -v -std=c++17 -arch=native -Xcompiler=-MD -x cu -rdc=true -c C:\\Users\\calli\\Desktop\\cuda_hello_word\\main.cu -o CMakeFiles\\cuda_hello.dir\\main.cu.obj -Xcompiler=-FdCMakeFiles\\cuda_hello.dir\\,-FS",
   "file": "C:\\Users\\calli\\Desktop\\cuda_hello_word\\main.cu",
   "output": "CMakeFiles\\cuda_hello.dir\\main.cu.obj"
 }

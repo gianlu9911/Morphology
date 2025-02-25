@@ -29,19 +29,19 @@
 			{
 				"command" : 0,
 				"file" : 0,
-				"line" : 23,
+				"line" : 31,
 				"parent" : 0
 			},
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 35,
+				"line" : 47,
 				"parent" : 0
 			},
 			{
 				"command" : 2,
 				"file" : 0,
-				"line" : 19,
+				"line" : 28,
 				"parent" : 0
 			}
 		]
@@ -52,17 +52,21 @@
 			"compileCommandFragments" : 
 			[
 				{
-					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -std=c++17 -arch=native -Xcompiler=-MD"
+					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -lineinfo -Xptxas -v -std=c++17 -arch=native -Xcompiler=-MD"
 				}
 			],
 			"includes" : 
 			[
 				{
 					"backtrace" : 3,
+					"path" : "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4/include"
+				},
+				{
+					"backtrace" : 3,
 					"path" : "C:/Users/calli/Desktop/cuda_hello_word/include"
 				},
 				{
-					"backtrace" : 2,
+					"backtrace" : 3,
 					"isSystem" : true,
 					"path" : "C:/Program Files/opencv/build/include"
 				}
@@ -88,7 +92,7 @@
 		"commandFragments" : 
 		[
 			{
-				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -arch=native -Xcompiler=-MD",
+				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -lineinfo -Xptxas -v -arch=native -Xcompiler=-MD",
 				"role" : "flags"
 			},
 			{
