@@ -2,105 +2,133 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
-#define TILE_DIM 32  // square block dimension; should be a multiple of warp size
-#define BLOCK_ROWS 32  // we use a square block, so BLOCK_ROWS = TILE_DIM
-
-// CUDA kernel: perform 1D horizontal erosion then write result in transposed order.
-// Input is a width×height image; output is a height×width image (i.e. fully transposed).
-__global__ void erosion1D_transpose_kernel_coalesced(const unsigned char* __restrict__ input,
-                                                     unsigned char* __restrict__ output,
-                                                     int width, int height,
-                                                     int window_radius)
+// CUDA kernel for 1xM (horizontal) morphological erosion using shared memory with multiple rows per block
+__global__ void erosionKernel1xM_shared_multiRow(
+    const unsigned char* d_input, 
+    unsigned char* d_output, 
+    int rows, 
+    int cols, 
+    size_t pitch, 
+    int kernelSize)
 {
-    // Using a square block of TILE_DIM x TILE_DIM threads.
-    int x = blockIdx.x * TILE_DIM + threadIdx.x;  // column index in input
-    int y = blockIdx.y * TILE_DIM + threadIdx.y;  // row index in input
-
-    // Each thread computes the erosion result for its pixel, if in range.
-    unsigned char result = 255;  // neutral element for min (erosion)
-    if (x < width && y < height)
-    {
-        unsigned char min_val = 255;
-        #pragma unroll
-        for (int dx = -window_radius; dx <= window_radius; dx++) {
-            int curX = x + dx;
-            // Clamp to valid column range:
-            curX = (curX < 0) ? 0 : ((curX >= width) ? width - 1 : curX);
-            unsigned char pix = input[y * width + curX];
-            min_val = min(min_val, pix);
-        }
-        result = min_val;
+    extern __shared__ unsigned char s_data[];
+    int radius = kernelSize / 2;
+    
+    // Calculate global coordinates
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    // Compute shared memory row offset for the current thread row within the block
+    int sharedRowWidth = blockDim.x + 2 * radius;
+    int rowOffset = threadIdx.y * sharedRowWidth;
+    int sharedIndex = rowOffset + threadIdx.x + radius;
+    
+    // Only process valid rows
+    if (y >= rows) return;
+    
+    // Get pointer to the start of the row in global memory
+    const unsigned char* rowPtr = d_input + y * pitch;
+    
+    // Load main data into shared memory for this row
+    if (x < cols)
+        s_data[sharedIndex] = rowPtr[x];
+    else
+        s_data[sharedIndex] = 255;
+    
+    // Load left halo for this row
+    if (threadIdx.x < radius) {
+        int haloX = x - radius;
+        s_data[rowOffset + threadIdx.x] = (haloX >= 0) ? rowPtr[haloX] : 255;
     }
-
-    // Declare shared memory tile with extra column to avoid bank conflicts.
-    __shared__ unsigned char tile[TILE_DIM][TILE_DIM+1];
-
-    // Each thread writes its computed result into shared memory.
-    tile[threadIdx.y][threadIdx.x] = result;
+    
+    // Load right halo for this row
+    if (threadIdx.x >= blockDim.x - radius) {
+        int haloX = x + radius;
+        int s_idx = rowOffset + threadIdx.x + 2 * radius; // correct offset in shared memory for right halo
+        s_data[s_idx] = (haloX < cols) ? rowPtr[haloX] : 255;
+    }
+    
     __syncthreads();
-
-    // Compute transposed coordinates.
-    // In the transposed output, the row index becomes the original column index and vice versa.
-    int transposedRow = blockIdx.x * TILE_DIM + threadIdx.y;  // becomes new row index
-    int transposedCol = blockIdx.y * TILE_DIM + threadIdx.x;    // becomes new column index
-
-    // Write the tile out in transposed order:
-    // Note that the output image has dimensions (height, width)
-    if (transposedRow < width && transposedCol < height)
-    {
-        // Read from shared memory with swapped indices.
-        output[transposedRow * height + transposedCol] = tile[threadIdx.x][threadIdx.y];
+    
+    // Only process valid columns
+    if (x >= cols)
+        return;
+    
+    // Compute the minimum over the kernel window using shared memory
+    unsigned char minVal = 255;
+    for (int i = -radius; i <= radius; i++) {
+        unsigned char val = s_data[sharedIndex + i];
+        if (val < minVal)
+            minVal = val;
     }
+    
+    // Write the result to output using pitched addressing
+    unsigned char* outRow = d_output + y * pitch;
+    outRow[x] = minVal;
 }
 
 int main()
 {
-    // Load the image from "../imgs/lena.jpg" in grayscale.
-    cv::Mat inputImage = cv::imread("../imgs/lena_4k.jpg", cv::IMREAD_GRAYSCALE);
-    if (inputImage.empty()) {
-        std::cerr << "Error: Could not open or find the image at ../imgs/lena.jpg" << std::endl;
+    // Load the image in grayscale
+    cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
+    if (img.empty()) {
+        std::cerr << "Error: Could not load image." << std::endl;
         return -1;
     }
+    
+    int rows = img.rows;
+    int cols = img.cols;
+    size_t imageSize = rows * cols * sizeof(unsigned char);
 
-    int width  = inputImage.cols;
-    int height = inputImage.rows;
-    size_t imageSize = width * height * sizeof(unsigned char);
+    // Allocate pinned host memory for input and output
+    unsigned char* h_inputPinned = nullptr;
+    unsigned char* h_outputPinned = nullptr;
+    cudaHostAlloc(&h_inputPinned, imageSize, cudaHostAllocDefault);
+    cudaHostAlloc(&h_outputPinned, imageSize, cudaHostAllocDefault);
+    memcpy(h_inputPinned, img.data, imageSize);
 
-    // The output image will be the transposed result of the erosion:
-    // Its dimensions will be (height x width)
-    cv::Mat outputImage(height, width, CV_8UC1);
-    // Note: Since the output is transposed relative to the input, when viewing
-    // it you'll see the rows and columns swapped.
-
-    // Allocate device memory.
+    // Device memory pointers and pitch
     unsigned char *d_input = nullptr, *d_output = nullptr;
-    cudaMalloc((void**)&d_input, imageSize);
-    cudaMalloc((void**)&d_output, imageSize);
+    size_t d_pitch = 0;
 
-    // Copy the input image to device.
-    cudaMemcpy(d_input, inputImage.data, imageSize, cudaMemcpyHostToDevice);
+    // Allocate device pitched memory
+    cudaMallocPitch(&d_input, &d_pitch, cols * sizeof(unsigned char), rows);
+    cudaMallocPitch(&d_output, &d_pitch, cols * sizeof(unsigned char), rows);
 
-    // Set up kernel launch parameters.
-    int window_radius = 1; // For a 3-pixel horizontal window.
-    dim3 blockDim(TILE_DIM, TILE_DIM);
-    dim3 gridDim((width + TILE_DIM - 1) / TILE_DIM,
-                 (height + TILE_DIM - 1) / TILE_DIM);
+    // Copy from pinned host memory to device pitched memory
+    cudaMemcpy2D(d_input, d_pitch, h_inputPinned, cols * sizeof(unsigned char),
+                 cols * sizeof(unsigned char), rows, cudaMemcpyHostToDevice);
 
-    // Launch the kernel.
-    erosion1D_transpose_kernel_coalesced<<<gridDim, blockDim>>>(d_input, d_output, width, height, window_radius);
+    int kernelSize = 7;  // must be odd
+    int radius = kernelSize / 2;
+    
+    // Use a 2D block: for example, 16x16 threads per block
+    dim3 block(16, 16);
+    dim3 grid((cols + block.x - 1) / block.x, (rows + block.y - 1) / block.y);
+    
+    // Shared memory size: blockDim.y rows * (blockDim.x + 2*radius) per row
+    size_t sharedMemSize = block.y * (block.x + 2 * radius) * sizeof(unsigned char);
+
+    // Launch kernel
+    erosionKernel1xM_shared_multiRow<<<grid, block, sharedMemSize>>>(d_input, d_output, rows, cols, d_pitch, kernelSize);
     cudaDeviceSynchronize();
 
-    // Copy the result back to host memory.
-    cudaMemcpy(outputImage.data, d_output, imageSize, cudaMemcpyDeviceToHost);
+    // Copy result back to pinned host memory
+    cudaMemcpy2D(h_outputPinned, cols * sizeof(unsigned char), d_output, d_pitch,
+                 cols * sizeof(unsigned char), rows, cudaMemcpyDeviceToHost);
 
-    // Free device memory.
+    // Create cv::Mat headers and display
+    cv::Mat pinnedInput(rows, cols, CV_8UC1, h_inputPinned);
+    cv::Mat pinnedOutput(rows, cols, CV_8UC1, h_outputPinned);
+    cv::imshow("Original Image (Pinned Input)", pinnedInput);
+    cv::imshow("Eroded Image (Multi-row per Block)", pinnedOutput);
+    cv::waitKey(0);
+
+    // Cleanup
     cudaFree(d_input);
     cudaFree(d_output);
-
-    // Display the images.
-    cv::imshow("Original Image", inputImage);
-    cv::imshow("Eroded Image (Transposed)", outputImage);
-    cv::waitKey(0);
+    cudaFreeHost(h_inputPinned);
+    cudaFreeHost(h_outputPinned);
 
     return 0;
 }
