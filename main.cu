@@ -37,55 +37,69 @@ __device__ inline unsigned char loadPixel(const unsigned char* d_input, int inde
 // For an output pixel at (row, col), the full horizontal window (of length 2*p - 1)
 // extends from col - (p-1) to col + (p-1). We split this window into left and right
 // sections and use warp-level reduction (via __shfl_down_sync) to compute the minimum.
-__global__ void erosion1dFullKernel(
-    const unsigned char* __restrict__ d_input,
-    unsigned char* __restrict__ d_output,
+/***********************************
+ * Horizontal Erosion Tiled Kernel (8-bit)
+ ***********************************/
+// For an output pixel at (row, col), the full horizontal window (of length 2*p - 1)
+// extends from col - (p-1) to col + (p-1). Each block processes a TILE_HEIGHT x TILE_WIDTH
+// tile of output pixels and loads a corresponding tile from global memory with extra columns
+// (apron) on the left and right.
+__global__ void horizontalErosionTiledKernel(
+    const unsigned char* d_input,
+    unsigned char* d_output,
     int width,
     int height,
-    int p) // p must be odd; window length = 2*p - 1
+    int p) // p must be odd; horizontal window width = 2*p - 1
 {
-    // Compute global warp ID.
-    int totalPixels = width * height;
-    int warpsPerBlock = blockDim.x / WARP_SIZE;
-    int globalWarpId = blockIdx.x * warpsPerBlock + (threadIdx.x / WARP_SIZE);
-    if (globalWarpId >= totalPixels) return;
+    const int apron = p - 1;
+    // Shared tile width includes the extra columns on left and right.
+    const int tileWidthShared = TILE_WIDTH + 2 * apron;
+    const int tileHeight = TILE_HEIGHT;
     
-    // Compute the output pixel coordinates.
-    int row = globalWarpId / width;
-    int col = globalWarpId % width;
+    // Compute the starting coordinates for this tile in the image.
+    int tileStartX = blockIdx.x * TILE_WIDTH;
+    int tileStartY = blockIdx.y * tileHeight;
     
-    // Determine the window bounds (clamped to the row boundaries).
-    int leftBound  = col - (p - 1);
-    int rightBound = col + (p - 1);
-    if (leftBound < 0) leftBound = 0;
-    if (rightBound >= width) rightBound = width - 1;
+    // Declare shared memory.
+    // Shared memory size should be allocated as: TILE_HEIGHT * (TILE_WIDTH + 2*(p-1)) bytes.
+    extern __shared__ unsigned char s_tile[];
     
-    // The full window is contiguous.
-    int count = rightBound - leftBound + 1;
-    
-    int lane = threadIdx.x % WARP_SIZE;
-    unsigned char localMin = 255;
-    
-    // Precompute the row offset.
-    int baseIdx = row * width;
-    
-    // Combined loop over the entire window.
-    for (int i = lane; i < count; i += WARP_SIZE) {
-        int x = leftBound + i;
-        int index = baseIdx + x;
-        unsigned char val = loadPixel(d_input, index); // helper: vectorized 32-bit read, then extract
-        localMin = min(localMin, val);
+    // Load the shared memory tile.
+    // Each thread loads one or more elements in a loop.
+    for (int y = threadIdx.y; y < tileHeight; y += blockDim.y) {
+        int globalY = tileStartY + y;
+        // Clamp the row index if needed.
+        globalY = (globalY < 0) ? 0 : (globalY >= height ? height - 1 : globalY);
+        for (int x = threadIdx.x; x < tileWidthShared; x += blockDim.x) {
+            // Compute global x. The shared memory tile starts at global x = tileStartX - apron.
+            int globalX = tileStartX + x - apron;
+            // Clamp the column index to image bounds.
+            globalX = (globalX < 0) ? 0 : (globalX >= width ? width - 1 : globalX);
+            int index = globalY * width + globalX;
+            s_tile[y * tileWidthShared + x] = d_input[index];
+        }
     }
+    __syncthreads();
     
-    // In-place warp reduction using __shfl_down_sync.
-    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
-        unsigned char other = __shfl_down_sync(0xffffffff, localMin, offset);
-        localMin = min(localMin, other);
-    }
+    // Compute the output pixel location.
+    int outX = tileStartX + threadIdx.x;
+    int outY = tileStartY + threadIdx.y;
     
-    // The first lane writes the result.
-    if (lane == 0) {
-        d_output[baseIdx + col] = localMin;
+    // Ensure we only process valid output pixels.
+    if (threadIdx.x < TILE_WIDTH && threadIdx.y < tileHeight && outX < width && outY < height) {
+        // In shared memory, the current pixel is at column (threadIdx.x + apron).
+        int sharedRow = threadIdx.y;
+        int sharedCol = threadIdx.x + apron;
+        unsigned char minVal = 255;
+        // Compute horizontal erosion over the window [sharedCol - (p-1), sharedCol + (p-1)].
+        int windowStart = sharedCol - (p - 1);
+        int windowEnd   = sharedCol + (p - 1);
+#pragma unroll
+        for (int i = windowStart; i <= windowEnd; i++) {
+            unsigned char val = s_tile[sharedRow * tileWidthShared + i];
+            minVal = min(minVal, val);
+        }
+        d_output[outY * width + outX] = minVal;
     }
 }
 
@@ -183,7 +197,12 @@ int main()
         int warpsPerBlock = threadsPerBlock / WARP_SIZE;
         int blocks = (totalPixels + warpsPerBlock - 1) / warpsPerBlock;
         
-        erosion1dFullKernel<<<blocks, threadsPerBlock>>>(d_input, d_outputHoriz, width, height, p);
+        dim3 blockDim(TILE_WIDTH, TILE_HEIGHT);
+        dim3 gridDim((width + TILE_WIDTH - 1) / TILE_WIDTH,
+                    (height + TILE_HEIGHT - 1) / TILE_HEIGHT);
+        size_t sharedMemSize = TILE_HEIGHT * (TILE_WIDTH + 2 * (p - 1)) * sizeof(unsigned char);
+
+        horizontalErosionTiledKernel<<<gridDim, blockDim, sharedMemSize>>>(d_input, d_outputHoriz, width, height, p);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     }
