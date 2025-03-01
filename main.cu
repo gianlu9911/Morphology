@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+// Define tile sizes for the vertical (tiled) kernel.
 #define TILE_WIDTH 16
 #define TILE_HEIGHT 16
 
@@ -18,135 +19,84 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort=t
     }
 }
 
-// Kernel: Each warp computes the erosion for one output pixel.
-// The erosion operation is defined over a window of size (2*p - 1) centered at the pixel.
-// It performs two warp-level reductions: one over the left section (from the window's left bound to the pixel)
-// and one over the right section (from the pixel to the window's right bound). The final output is the minimum
-// of these two values.
+//---------------------------------------------------------------------
+// Helper function for vectorized 32-bit loads from global memory.
+// Assumes d_input is 8-bit data that is 4-byte aligned and index is in [0, numPixels).
+// Loads 32 bits (4 bytes) at a time and extracts the byte corresponding to 'index'.
+__device__ inline unsigned char loadPixel(const unsigned char* d_input, int index) {
+    int intIndex = index / 4;           // which 32-bit word
+    int offset   = index % 4;           // which byte inside that word
+    int data = ((const int*)d_input)[intIndex]; // 32-bit load
+    return (data >> (8 * offset)) & 0xFF;
+}
+//---------------------------------------------------------------------
+
+/***********************************
+ * Horizontal Erosion Kernel (8-bit)
+ ***********************************/
+// For an output pixel at (row, col), the full horizontal window (of length 2*p - 1)
+// extends from col - (p-1) to col + (p-1). We split this window into left and right
+// sections and use warp-level reduction (via __shfl_down_sync) to compute the minimum.
 __global__ void erosion1dFullKernel(
-    const unsigned char* d_input,
-    unsigned char* d_output,
+    const unsigned char* __restrict__ d_input,
+    unsigned char* __restrict__ d_output,
     int width,
     int height,
-    int p) // p must be odd; full window length = 2*p - 1
+    int p) // p must be odd; window length = 2*p - 1
 {
-    // Total number of output pixels.
+    // Compute global warp ID.
     int totalPixels = width * height;
-    
-    // Each warp handles one output pixel.
-    // Compute global warp ID:
     int warpsPerBlock = blockDim.x / WARP_SIZE;
     int globalWarpId = blockIdx.x * warpsPerBlock + (threadIdx.x / WARP_SIZE);
-    
     if (globalWarpId >= totalPixels) return;
     
-    // Determine the output pixel coordinates.
+    // Compute the output pixel coordinates.
     int row = globalWarpId / width;
     int col = globalWarpId % width;
     
-    // Define the full window (centered at col):
-    // Window extends from col - (p - 1) to col + (p - 1)
-    int leftBound = col - (p - 1);
+    // Determine the window bounds (clamped to the row boundaries).
+    int leftBound  = col - (p - 1);
     int rightBound = col + (p - 1);
-    
-    // Clamp window boundaries to the image row.
     if (leftBound < 0) leftBound = 0;
     if (rightBound >= width) rightBound = width - 1;
     
-    // Left section: from leftBound to col (inclusive).
-    int leftCount = col - leftBound + 1;
-    // Right section: from col to rightBound (inclusive).
-    int rightCount = rightBound - col + 1;
+    // The full window is contiguous.
+    int count = rightBound - leftBound + 1;
     
     int lane = threadIdx.x % WARP_SIZE;
+    unsigned char localMin = 255;
     
-    // --- Left Section Reduction ---
-    unsigned char leftLocalMin = 255;
-    // Each thread in the warp loads part of the left section.
-    for (int i = lane; i < leftCount; i += WARP_SIZE) {
+    // Precompute the row offset.
+    int baseIdx = row * width;
+    
+    // Combined loop over the entire window.
+    for (int i = lane; i < count; i += WARP_SIZE) {
         int x = leftBound + i;
-        unsigned char val = d_input[row * width + x];
-        leftLocalMin = min(leftLocalMin, val);
+        int index = baseIdx + x;
+        unsigned char val = loadPixel(d_input, index); // helper: vectorized 32-bit read, then extract
+        localMin = min(localMin, val);
     }
-    // Warp-level reduction over the left section.
+    
+    // In-place warp reduction using __shfl_down_sync.
     for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
-        unsigned char other = __shfl_down_sync(0xffffffff, leftLocalMin, offset);
-        leftLocalMin = min(leftLocalMin, other);
+        unsigned char other = __shfl_down_sync(0xffffffff, localMin, offset);
+        localMin = min(localMin, other);
     }
     
-    // --- Right Section Reduction ---
-    unsigned char rightLocalMin = 255;
-    for (int i = lane; i < rightCount; i += WARP_SIZE) {
-        int x = col + i; // right section starts at col.
-        unsigned char val = d_input[row * width + x];
-        rightLocalMin = min(rightLocalMin, val);
-    }
-    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
-        unsigned char other = __shfl_down_sync(0xffffffff, rightLocalMin, offset);
-        rightLocalMin = min(rightLocalMin, other);
-    }
-    
-    // The final erosion value is the minimum of the two reductions.
-    unsigned char finalMin = min(leftLocalMin, rightLocalMin);
-    
-    // Lane 0 of each warp writes the output.
+    // The first lane writes the result.
     if (lane == 0) {
-        d_output[row * width + col] = finalMin;
+        d_output[baseIdx + col] = localMin;
     }
 }
 
-int main_not_now()
-{
-    // Load a grayscale image using OpenCV.
-    cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
-    if (img.empty()) {
-        std::cerr << "Error: Could not load image." << std::endl;
-        return -1;
-    }
-    int width = img.cols;
-    int height = img.rows;
-    
-    size_t imageSize = width * height * sizeof(unsigned char);
-    unsigned char *d_input = nullptr, *d_output = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_input, imageSize));
-    CUDA_CHECK(cudaMalloc(&d_output, imageSize));
-    
-    // Copy input image to device.
-    CUDA_CHECK(cudaMemcpy(d_input, img.data, imageSize, cudaMemcpyHostToDevice));
-    
-    // Launch configuration: one warp per output pixel.
-    int totalPixels = width * height;
-    // Each warp has WARP_SIZE threads.
-    int warpsNeeded = totalPixels;
-    int threadsPerBlock = 256; // e.g., 256 threads per block.
-    int warpsPerBlock = threadsPerBlock / WARP_SIZE;
-    int blocks = (warpsNeeded + warpsPerBlock - 1) / warpsPerBlock;
-    
-    erosion1dFullKernel<<<blocks, threadsPerBlock>>>(d_input, d_output, width, height, 7);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-    
-    // Copy the result back to host.
-    cv::Mat output(img.size(), img.type());
-    CUDA_CHECK(cudaMemcpy(output.data, d_output, imageSize, cudaMemcpyDeviceToHost));
-    
-    // Display the input and the eroded output.
-    cv::imshow("Input", img);
-    cv::imshow("Eroded Output", output);
-    cv::waitKey(0);
-    
-    CUDA_CHECK(cudaFree(d_input));
-    CUDA_CHECK(cudaFree(d_output));
-    
-    return 0;
-}
 
-
-// Kernel: Vertical erosion using tiling for improved coalesced global memory accesses.
-// For each block, we load a tile of the input image into shared memory. The tile dimensions
-// are TILE_WIDTH x (TILE_HEIGHT + 2*(p-1)) to include the apron rows needed for a vertical window
-// of size (2*p - 1). Then, each thread computes the vertical erosion for its pixel using the data
-// in shared memory.
+/***********************************
+ * Vertical Erosion Tiled Kernel (8-bit)
+ ***********************************/
+// This kernel loads a tile (with extra rows as an apron) into shared memory
+// using nested loops that allow coalesced 32-bit loads (via loadPixel).
+// Then, each thread computes the vertical erosion (minimum over a vertical window)
+// for its assigned pixel.
 __global__ void verticalErosionTiledKernel(
     const unsigned char* d_input,
     unsigned char* d_output,
@@ -154,105 +104,117 @@ __global__ void verticalErosionTiledKernel(
     int height,
     int p) // p must be odd; vertical window height = 2*p - 1
 {
-    // Define apron size (p-1) above and below.
     const int apron = p - 1;
-    // Shared memory tile height includes the output tile plus the top and bottom apron.
     const int tileHeightShared = TILE_HEIGHT + 2 * apron;
     const int tileWidth = TILE_WIDTH;
-
-    // Calculate the starting coordinates of the tile in global memory.
+    
     int tileStartX = blockIdx.x * tileWidth;
     int tileStartY = blockIdx.y * TILE_HEIGHT;
-
-    // Allocate shared memory tile.
-    // The shared memory buffer holds tileWidth * tileHeightShared elements.
+    
     extern __shared__ unsigned char s_tile[];
-
-    // Each thread loads one or more elements into shared memory in a coalesced manner.
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    // Total number of threads in the block.
-    int numThreads = blockDim.x * blockDim.y;
-    int threadId = ty * blockDim.x + tx;
-    int totalElements = tileWidth * tileHeightShared;
-    for (int i = threadId; i < totalElements; i += numThreads)
-    {
-        int x = i % tileWidth;
-        int y = i / tileWidth;
-        // Compute the corresponding global row, with an offset to include the top apron.
+    
+    // Load the shared memory tile using nested loops.
+    for (int y = threadIdx.y; y < tileHeightShared; y += blockDim.y) {
         int globalY = tileStartY + y - apron;
-        // Clamp to image boundaries.
-        if (globalY < 0) globalY = 0;
-        if (globalY >= height) globalY = height - 1;
-        int globalX = tileStartX + x;
-        unsigned char val = 0;
-        if (globalX < width)
-            val = d_input[globalY * width + globalX];
-        s_tile[y * tileWidth + x] = val;
+        globalY = (globalY < 0) ? 0 : (globalY >= height ? height - 1 : globalY);
+        for (int x = threadIdx.x; x < tileWidth; x += blockDim.x) {
+            int globalX = tileStartX + x;
+            int index = globalY * width + globalX;
+            unsigned char val = 0;
+            if (globalX < width)
+                val = loadPixel(d_input, index);
+            s_tile[y * tileWidth + x] = val;
+        }
     }
     __syncthreads();
-
-    // Now, each thread computes vertical erosion for one output pixel in the tile.
-    // The output region in shared memory starts at row 'apron' and spans TILE_HEIGHT rows.
-    int outX = tileStartX + tx;
-    int outY = tileStartY + ty;
-    if (tx < tileWidth && ty < TILE_HEIGHT && outX < width && outY < height)
-    {
-        // The corresponding location in shared memory.
-        int sharedY = apron + ty;
+    
+    int outX = tileStartX + threadIdx.x;
+    int outY = tileStartY + threadIdx.y;
+    if (threadIdx.x < tileWidth && threadIdx.y < TILE_HEIGHT && outX < width && outY < height) {
+        int sharedY = apron + threadIdx.y;
         unsigned char minVal = 255;
-        // The vertical window in shared memory spans from (sharedY - (p-1)) to (sharedY + (p-1)).
         int windowStart = sharedY - (p - 1);
-        int windowEnd = sharedY + (p - 1);
-        for (int r = windowStart; r <= windowEnd; r++)
-        {
-            unsigned char val = s_tile[r * tileWidth + tx];
+        int windowEnd   = sharedY + (p - 1);
+#pragma unroll
+        for (int r = windowStart; r <= windowEnd; r++) {
+            unsigned char val = s_tile[r * tileWidth + threadIdx.x];
             minVal = min(minVal, val);
         }
-        // Write the computed erosion value to global memory.
         d_output[outY * width + outX] = minVal;
     }
 }
 
+/***********************************
+ * Combined main() Function
+ ***********************************/
 int main()
 {
-    // Load the grayscale image using OpenCV.
+    // Load a grayscale image using OpenCV.
     cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
-    if (img.empty())
-    {
+    if (img.empty()) {
         std::cerr << "Error: Could not load image." << std::endl;
         return -1;
     }
+    
     int width = img.cols;
     int height = img.rows;
-    size_t imageSize = width * height * sizeof(unsigned char);
-
-    unsigned char *d_input = nullptr, *d_output = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_input, imageSize));
-    CUDA_CHECK(cudaMalloc(&d_output, imageSize));
-    CUDA_CHECK(cudaMemcpy(d_input, img.data, imageSize, cudaMemcpyHostToDevice));
-
-    int p = 7;  // Must be odd; vertical window height will be 2*p - 1.
-    // Define grid dimensions based on tile size.
-    dim3 blockDim(TILE_WIDTH, TILE_HEIGHT);
-    dim3 gridDim((width + TILE_WIDTH - 1) / TILE_WIDTH,
-                 (height + TILE_HEIGHT - 1) / TILE_HEIGHT);
-    // Shared memory per block: TILE_WIDTH * (TILE_HEIGHT + 2*(p-1)) bytes.
-    size_t sharedMemSize = TILE_WIDTH * (TILE_HEIGHT + 2 * (p - 1)) * sizeof(unsigned char);
-
-    verticalErosionTiledKernel<<<gridDim, blockDim, sharedMemSize>>>(d_input, d_output, width, height, p);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    cv::Mat output(img.size(), img.type());
-    CUDA_CHECK(cudaMemcpy(output.data, d_output, imageSize, cudaMemcpyDeviceToHost));
-
+    size_t numPixels = width * height;
+    size_t imageSizeBytes = numPixels * sizeof(unsigned char);
+    
+    // We assume the image data are 8-bit (grayscale) and 4-byte aligned.
+    // (If not, you may want to copy/align the data on the host before uploading.)
+    
+    // Allocate device memory.
+    unsigned char *d_input = nullptr;
+    unsigned char *d_outputHoriz = nullptr;
+    unsigned char *d_outputVert = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_input, imageSizeBytes));
+    CUDA_CHECK(cudaMalloc(&d_outputHoriz, imageSizeBytes));
+    CUDA_CHECK(cudaMalloc(&d_outputVert, imageSizeBytes));
+    
+    CUDA_CHECK(cudaMemcpy(d_input, img.data, imageSizeBytes, cudaMemcpyHostToDevice));
+    
+    int p = 7;  // Must be odd; full window length = 2*p - 1.
+    
+    /********** Horizontal Erosion **********/
+    {
+        int totalPixels = width * height;
+        int threadsPerBlock = 256; // e.g., 256 threads per block.
+        int warpsPerBlock = threadsPerBlock / WARP_SIZE;
+        int blocks = (totalPixels + warpsPerBlock - 1) / warpsPerBlock;
+        
+        erosion1dFullKernel<<<blocks, threadsPerBlock>>>(d_input, d_outputHoriz, width, height, p);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
+    
+    /********** Vertical Erosion (Tiled) **********/
+    {
+        dim3 blockDim(TILE_WIDTH, TILE_HEIGHT);
+        dim3 gridDim((width + TILE_WIDTH - 1) / TILE_WIDTH,
+                     (height + TILE_HEIGHT - 1) / TILE_HEIGHT);
+        size_t sharedMemSize = TILE_WIDTH * (TILE_HEIGHT + 2 * (p - 1)) * sizeof(unsigned char);
+        
+        verticalErosionTiledKernel<<<gridDim, blockDim, sharedMemSize>>>(d_input, d_outputVert, width, height, p);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
+    
+    // Copy results back to host.
+    cv::Mat outputHoriz(img.size(), img.type());
+    cv::Mat outputVert(img.size(), img.type());
+    CUDA_CHECK(cudaMemcpy(outputHoriz.data, d_outputHoriz, imageSizeBytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(outputVert.data, d_outputVert, imageSizeBytes, cudaMemcpyDeviceToHost));
+    
+    // Display the input and both eroded outputs.
     cv::imshow("Input", img);
-    cv::imshow("Vertical Eroded Output (Tiled)", output);
+    cv::imshow("Horizontal Eroded Output (8-bit, 32-bit loads)", outputHoriz);
+    cv::imshow("Vertical Eroded Output (Tiled, 8-bit, 32-bit loads)", outputVert);
     cv::waitKey(0);
-
+    
     CUDA_CHECK(cudaFree(d_input));
-    CUDA_CHECK(cudaFree(d_output));
-
+    CUDA_CHECK(cudaFree(d_outputHoriz));
+    CUDA_CHECK(cudaFree(d_outputVert));
+    
     return 0;
 }
