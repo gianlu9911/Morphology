@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 
+#define TILE_WIDTH 16
+#define TILE_HEIGHT 16
+
 #define WARP_SIZE 32
 
 // CUDA error checking macro.
@@ -92,7 +95,7 @@ __global__ void erosion1dFullKernel(
     }
 }
 
-int main()
+int main_not_now()
 {
     // Load a grayscale image using OpenCV.
     cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
@@ -135,5 +138,121 @@ int main()
     CUDA_CHECK(cudaFree(d_input));
     CUDA_CHECK(cudaFree(d_output));
     
+    return 0;
+}
+
+
+// Kernel: Vertical erosion using tiling for improved coalesced global memory accesses.
+// For each block, we load a tile of the input image into shared memory. The tile dimensions
+// are TILE_WIDTH x (TILE_HEIGHT + 2*(p-1)) to include the apron rows needed for a vertical window
+// of size (2*p - 1). Then, each thread computes the vertical erosion for its pixel using the data
+// in shared memory.
+__global__ void verticalErosionTiledKernel(
+    const unsigned char* d_input,
+    unsigned char* d_output,
+    int width,
+    int height,
+    int p) // p must be odd; vertical window height = 2*p - 1
+{
+    // Define apron size (p-1) above and below.
+    const int apron = p - 1;
+    // Shared memory tile height includes the output tile plus the top and bottom apron.
+    const int tileHeightShared = TILE_HEIGHT + 2 * apron;
+    const int tileWidth = TILE_WIDTH;
+
+    // Calculate the starting coordinates of the tile in global memory.
+    int tileStartX = blockIdx.x * tileWidth;
+    int tileStartY = blockIdx.y * TILE_HEIGHT;
+
+    // Allocate shared memory tile.
+    // The shared memory buffer holds tileWidth * tileHeightShared elements.
+    extern __shared__ unsigned char s_tile[];
+
+    // Each thread loads one or more elements into shared memory in a coalesced manner.
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    // Total number of threads in the block.
+    int numThreads = blockDim.x * blockDim.y;
+    int threadId = ty * blockDim.x + tx;
+    int totalElements = tileWidth * tileHeightShared;
+    for (int i = threadId; i < totalElements; i += numThreads)
+    {
+        int x = i % tileWidth;
+        int y = i / tileWidth;
+        // Compute the corresponding global row, with an offset to include the top apron.
+        int globalY = tileStartY + y - apron;
+        // Clamp to image boundaries.
+        if (globalY < 0) globalY = 0;
+        if (globalY >= height) globalY = height - 1;
+        int globalX = tileStartX + x;
+        unsigned char val = 0;
+        if (globalX < width)
+            val = d_input[globalY * width + globalX];
+        s_tile[y * tileWidth + x] = val;
+    }
+    __syncthreads();
+
+    // Now, each thread computes vertical erosion for one output pixel in the tile.
+    // The output region in shared memory starts at row 'apron' and spans TILE_HEIGHT rows.
+    int outX = tileStartX + tx;
+    int outY = tileStartY + ty;
+    if (tx < tileWidth && ty < TILE_HEIGHT && outX < width && outY < height)
+    {
+        // The corresponding location in shared memory.
+        int sharedY = apron + ty;
+        unsigned char minVal = 255;
+        // The vertical window in shared memory spans from (sharedY - (p-1)) to (sharedY + (p-1)).
+        int windowStart = sharedY - (p - 1);
+        int windowEnd = sharedY + (p - 1);
+        for (int r = windowStart; r <= windowEnd; r++)
+        {
+            unsigned char val = s_tile[r * tileWidth + tx];
+            minVal = min(minVal, val);
+        }
+        // Write the computed erosion value to global memory.
+        d_output[outY * width + outX] = minVal;
+    }
+}
+
+int main()
+{
+    // Load the grayscale image using OpenCV.
+    cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
+    if (img.empty())
+    {
+        std::cerr << "Error: Could not load image." << std::endl;
+        return -1;
+    }
+    int width = img.cols;
+    int height = img.rows;
+    size_t imageSize = width * height * sizeof(unsigned char);
+
+    unsigned char *d_input = nullptr, *d_output = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_input, imageSize));
+    CUDA_CHECK(cudaMalloc(&d_output, imageSize));
+    CUDA_CHECK(cudaMemcpy(d_input, img.data, imageSize, cudaMemcpyHostToDevice));
+
+    int p = 7;  // Must be odd; vertical window height will be 2*p - 1.
+    // Define grid dimensions based on tile size.
+    dim3 blockDim(TILE_WIDTH, TILE_HEIGHT);
+    dim3 gridDim((width + TILE_WIDTH - 1) / TILE_WIDTH,
+                 (height + TILE_HEIGHT - 1) / TILE_HEIGHT);
+    // Shared memory per block: TILE_WIDTH * (TILE_HEIGHT + 2*(p-1)) bytes.
+    size_t sharedMemSize = TILE_WIDTH * (TILE_HEIGHT + 2 * (p - 1)) * sizeof(unsigned char);
+
+    verticalErosionTiledKernel<<<gridDim, blockDim, sharedMemSize>>>(d_input, d_output, width, height, p);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    cv::Mat output(img.size(), img.type());
+    CUDA_CHECK(cudaMemcpy(output.data, d_output, imageSize, cudaMemcpyDeviceToHost));
+
+    cv::imshow("Input", img);
+    cv::imshow("Vertical Eroded Output (Tiled)", output);
+    cv::waitKey(0);
+
+    CUDA_CHECK(cudaFree(d_input));
+    CUDA_CHECK(cudaFree(d_output));
+
     return 0;
 }
