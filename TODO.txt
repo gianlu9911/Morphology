@@ -1,0 +1,5 @@
+in main.cu
+
+we have coalesced memory but thread are almost in stall
+
+evaluate to use async trnsfer and pinned memory and pinched memory

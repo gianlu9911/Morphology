@@ -1,134 +1,139 @@
 #include <opencv2/opencv.hpp>
-#include <iostream>
 #include <cuda_runtime.h>
+#include <iostream>
+#include <cstdio>
+#include <cstdlib>
 
-// CUDA kernel for 1xM (horizontal) morphological erosion using shared memory with multiple rows per block
-__global__ void erosionKernel1xM_shared_multiRow(
-    const unsigned char* d_input, 
-    unsigned char* d_output, 
-    int rows, 
-    int cols, 
-    size_t pitch, 
-    int kernelSize)
+#define WARP_SIZE 32
+
+// CUDA error checking macro.
+#define CUDA_CHECK(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort=true) {
+    if (code != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
+        if (abort) exit(code);
+    }
+}
+
+// Kernel: Each warp computes the erosion for one output pixel.
+// The erosion operation is defined over a window of size (2*p - 1) centered at the pixel.
+// It performs two warp-level reductions: one over the left section (from the window's left bound to the pixel)
+// and one over the right section (from the pixel to the window's right bound). The final output is the minimum
+// of these two values.
+__global__ void erosion1dFullKernel(
+    const unsigned char* d_input,
+    unsigned char* d_output,
+    int width,
+    int height,
+    int p) // p must be odd; full window length = 2*p - 1
 {
-    extern __shared__ unsigned char s_data[];
-    int radius = kernelSize / 2;
+    // Total number of output pixels.
+    int totalPixels = width * height;
     
-    // Calculate global coordinates
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // Each warp handles one output pixel.
+    // Compute global warp ID:
+    int warpsPerBlock = blockDim.x / WARP_SIZE;
+    int globalWarpId = blockIdx.x * warpsPerBlock + (threadIdx.x / WARP_SIZE);
     
-    // Compute shared memory row offset for the current thread row within the block
-    int sharedRowWidth = blockDim.x + 2 * radius;
-    int rowOffset = threadIdx.y * sharedRowWidth;
-    int sharedIndex = rowOffset + threadIdx.x + radius;
+    if (globalWarpId >= totalPixels) return;
     
-    // Only process valid rows
-    if (y >= rows) return;
+    // Determine the output pixel coordinates.
+    int row = globalWarpId / width;
+    int col = globalWarpId % width;
     
-    // Get pointer to the start of the row in global memory
-    const unsigned char* rowPtr = d_input + y * pitch;
+    // Define the full window (centered at col):
+    // Window extends from col - (p - 1) to col + (p - 1)
+    int leftBound = col - (p - 1);
+    int rightBound = col + (p - 1);
     
-    // Load main data into shared memory for this row
-    if (x < cols)
-        s_data[sharedIndex] = rowPtr[x];
-    else
-        s_data[sharedIndex] = 255;
+    // Clamp window boundaries to the image row.
+    if (leftBound < 0) leftBound = 0;
+    if (rightBound >= width) rightBound = width - 1;
     
-    // Load left halo for this row
-    if (threadIdx.x < radius) {
-        int haloX = x - radius;
-        s_data[rowOffset + threadIdx.x] = (haloX >= 0) ? rowPtr[haloX] : 255;
+    // Left section: from leftBound to col (inclusive).
+    int leftCount = col - leftBound + 1;
+    // Right section: from col to rightBound (inclusive).
+    int rightCount = rightBound - col + 1;
+    
+    int lane = threadIdx.x % WARP_SIZE;
+    
+    // --- Left Section Reduction ---
+    unsigned char leftLocalMin = 255;
+    // Each thread in the warp loads part of the left section.
+    for (int i = lane; i < leftCount; i += WARP_SIZE) {
+        int x = leftBound + i;
+        unsigned char val = d_input[row * width + x];
+        leftLocalMin = min(leftLocalMin, val);
+    }
+    // Warp-level reduction over the left section.
+    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
+        unsigned char other = __shfl_down_sync(0xffffffff, leftLocalMin, offset);
+        leftLocalMin = min(leftLocalMin, other);
     }
     
-    // Load right halo for this row
-    if (threadIdx.x >= blockDim.x - radius) {
-        int haloX = x + radius;
-        int s_idx = rowOffset + threadIdx.x + 2 * radius; // correct offset in shared memory for right halo
-        s_data[s_idx] = (haloX < cols) ? rowPtr[haloX] : 255;
+    // --- Right Section Reduction ---
+    unsigned char rightLocalMin = 255;
+    for (int i = lane; i < rightCount; i += WARP_SIZE) {
+        int x = col + i; // right section starts at col.
+        unsigned char val = d_input[row * width + x];
+        rightLocalMin = min(rightLocalMin, val);
+    }
+    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
+        unsigned char other = __shfl_down_sync(0xffffffff, rightLocalMin, offset);
+        rightLocalMin = min(rightLocalMin, other);
     }
     
-    __syncthreads();
+    // The final erosion value is the minimum of the two reductions.
+    unsigned char finalMin = min(leftLocalMin, rightLocalMin);
     
-    // Only process valid columns
-    if (x >= cols)
-        return;
-    
-    // Compute the minimum over the kernel window using shared memory
-    unsigned char minVal = 255;
-    for (int i = -radius; i <= radius; i++) {
-        unsigned char val = s_data[sharedIndex + i];
-        if (val < minVal)
-            minVal = val;
+    // Lane 0 of each warp writes the output.
+    if (lane == 0) {
+        d_output[row * width + col] = finalMin;
     }
-    
-    // Write the result to output using pitched addressing
-    unsigned char* outRow = d_output + y * pitch;
-    outRow[x] = minVal;
 }
 
 int main()
 {
-    // Load the image in grayscale
+    // Load a grayscale image using OpenCV.
     cv::Mat img = cv::imread("../imgs/lena.jpg", cv::IMREAD_GRAYSCALE);
     if (img.empty()) {
         std::cerr << "Error: Could not load image." << std::endl;
         return -1;
     }
+    int width = img.cols;
+    int height = img.rows;
     
-    int rows = img.rows;
-    int cols = img.cols;
-    size_t imageSize = rows * cols * sizeof(unsigned char);
-
-    // Allocate pinned host memory for input and output
-    unsigned char* h_inputPinned = nullptr;
-    unsigned char* h_outputPinned = nullptr;
-    cudaHostAlloc(&h_inputPinned, imageSize, cudaHostAllocDefault);
-    cudaHostAlloc(&h_outputPinned, imageSize, cudaHostAllocDefault);
-    memcpy(h_inputPinned, img.data, imageSize);
-
-    // Device memory pointers and pitch
+    size_t imageSize = width * height * sizeof(unsigned char);
     unsigned char *d_input = nullptr, *d_output = nullptr;
-    size_t d_pitch = 0;
-
-    // Allocate device pitched memory
-    cudaMallocPitch(&d_input, &d_pitch, cols * sizeof(unsigned char), rows);
-    cudaMallocPitch(&d_output, &d_pitch, cols * sizeof(unsigned char), rows);
-
-    // Copy from pinned host memory to device pitched memory
-    cudaMemcpy2D(d_input, d_pitch, h_inputPinned, cols * sizeof(unsigned char),
-                 cols * sizeof(unsigned char), rows, cudaMemcpyHostToDevice);
-
-    int kernelSize = 7;  // must be odd
-    int radius = kernelSize / 2;
+    CUDA_CHECK(cudaMalloc(&d_input, imageSize));
+    CUDA_CHECK(cudaMalloc(&d_output, imageSize));
     
-    // Use a 2D block: for example, 16x16 threads per block
-    dim3 block(16, 16);
-    dim3 grid((cols + block.x - 1) / block.x, (rows + block.y - 1) / block.y);
+    // Copy input image to device.
+    CUDA_CHECK(cudaMemcpy(d_input, img.data, imageSize, cudaMemcpyHostToDevice));
     
-    // Shared memory size: blockDim.y rows * (blockDim.x + 2*radius) per row
-    size_t sharedMemSize = block.y * (block.x + 2 * radius) * sizeof(unsigned char);
-
-    // Launch kernel
-    erosionKernel1xM_shared_multiRow<<<grid, block, sharedMemSize>>>(d_input, d_output, rows, cols, d_pitch, kernelSize);
-    cudaDeviceSynchronize();
-
-    // Copy result back to pinned host memory
-    cudaMemcpy2D(h_outputPinned, cols * sizeof(unsigned char), d_output, d_pitch,
-                 cols * sizeof(unsigned char), rows, cudaMemcpyDeviceToHost);
-
-    // Create cv::Mat headers and display
-    cv::Mat pinnedInput(rows, cols, CV_8UC1, h_inputPinned);
-    cv::Mat pinnedOutput(rows, cols, CV_8UC1, h_outputPinned);
-    cv::imshow("Original Image (Pinned Input)", pinnedInput);
-    cv::imshow("Eroded Image (Multi-row per Block)", pinnedOutput);
+    // Launch configuration: one warp per output pixel.
+    int totalPixels = width * height;
+    // Each warp has WARP_SIZE threads.
+    int warpsNeeded = totalPixels;
+    int threadsPerBlock = 256; // e.g., 256 threads per block.
+    int warpsPerBlock = threadsPerBlock / WARP_SIZE;
+    int blocks = (warpsNeeded + warpsPerBlock - 1) / warpsPerBlock;
+    
+    erosion1dFullKernel<<<blocks, threadsPerBlock>>>(d_input, d_output, width, height, 7);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    // Copy the result back to host.
+    cv::Mat output(img.size(), img.type());
+    CUDA_CHECK(cudaMemcpy(output.data, d_output, imageSize, cudaMemcpyDeviceToHost));
+    
+    // Display the input and the eroded output.
+    cv::imshow("Input", img);
+    cv::imshow("Eroded Output", output);
     cv::waitKey(0);
-
-    // Cleanup
-    cudaFree(d_input);
-    cudaFree(d_output);
-    cudaFreeHost(h_inputPinned);
-    cudaFreeHost(h_outputPinned);
-
+    
+    CUDA_CHECK(cudaFree(d_input));
+    CUDA_CHECK(cudaFree(d_output));
+    
     return 0;
 }
