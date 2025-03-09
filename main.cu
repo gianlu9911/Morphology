@@ -5,35 +5,14 @@
 #define HISTOGRAM_SIZE 256
 #define BLOCK_SIZE 256  
 
-// Compute histogram using pitched memory. The kernel uses a striding pattern to process all pixels.
-__global__ void computeHistogram(const unsigned char *d_input, size_t pitch, int *d_hist, int width, int height) {
-    __shared__ int hist_shared[HISTOGRAM_SIZE];
 
-    // Initialize shared histogram
-    for (int i = threadIdx.x; i < HISTOGRAM_SIZE; i += blockDim.x) {
-        hist_shared[i] = 0;
-    }
-    __syncthreads();
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <cuda_runtime.h>
 
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    int stride = blockDim.x * gridDim.x;
-    
-    // Process each pixel in a strided loop
-    while (idx < width * height) {
-        int row = idx / width;
-        int col = idx % width;
-        // Compute address using the pitch
-        unsigned char pixel = *((unsigned char*)((char*)d_input + row * pitch) + col);
-        atomicAdd(&hist_shared[pixel], 1);
-        idx += stride;
-    }
-    __syncthreads();
-
-    // Merge shared histogram into global histogram
-    for (int i = threadIdx.x; i < HISTOGRAM_SIZE; i += blockDim.x) {
-        atomicAdd(&d_hist[i], hist_shared[i]);
-    }
-}
+#define BINS 256       // For grayscale images (0-255)
+#define TILE_W 32      // Tile width (and blockDim.x)
+#define TILE_H 32      // Tile height (and blockDim.y)
 
 // Compute the Cumulative Distribution Function (CDF) using an inclusive scan (Hillis-Steele algorithm)
 __global__ void computeCDF(int *d_hist, int *d_cdf, int total_pixels) {
@@ -74,77 +53,6 @@ __global__ void equalizeHistogram(unsigned char *d_image, size_t pitch, const in
         idx += stride;
     }
 }
-
-void histogramEqualizationCUDA(cv::Mat &inputImage) {
-    int width = inputImage.cols;
-    int height = inputImage.rows;
-    int total_pixels = width * height;
-    
-    unsigned char *d_input;
-    int *d_hist, *d_cdf;
-    size_t pitch;
-    
-    // Allocate pitched memory for the image on device
-    cudaMallocPitch(&d_input, &pitch, width * sizeof(unsigned char), height);
-    cudaMalloc(&d_hist, HISTOGRAM_SIZE * sizeof(int));
-    cudaMalloc(&d_cdf, HISTOGRAM_SIZE * sizeof(int));
-
-    // Copy image from host to device with 2D copy (using the pitch)
-    cudaMemcpy2D(d_input, pitch, inputImage.data, width * sizeof(unsigned char),
-                 width * sizeof(unsigned char), height, cudaMemcpyHostToDevice);
-    cudaMemset(d_hist, 0, HISTOGRAM_SIZE * sizeof(int));
-
-    int numBlocks = (total_pixels + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    computeHistogram<<<numBlocks, BLOCK_SIZE>>>(d_input, pitch, d_hist, width, height);
-    computeCDF<<<1, HISTOGRAM_SIZE>>>(d_hist, d_cdf, total_pixels);
-
-    // Retrieve CDF to compute cdf_min
-    int h_cdf[HISTOGRAM_SIZE];
-    cudaMemcpy(h_cdf, d_cdf, HISTOGRAM_SIZE * sizeof(int), cudaMemcpyDeviceToHost);
-    
-    int cdf_min = 0;
-    for (int i = 0; i < HISTOGRAM_SIZE; i++) {
-        if (h_cdf[i] > 0) {
-            cdf_min = h_cdf[i];
-            break;
-        }
-    }
-
-    // Apply histogram equalization on device
-    equalizeHistogram<<<numBlocks, BLOCK_SIZE>>>(d_input, pitch, d_cdf, width, height, cdf_min, total_pixels);
-
-    // Copy the result back to host using cudaMemcpy2D
-    cudaMemcpy2D(inputImage.data, width * sizeof(unsigned char), d_input, pitch,
-                 width * sizeof(unsigned char), height, cudaMemcpyDeviceToHost);
-
-    // Free allocated device memory
-    cudaFree(d_input);
-    cudaFree(d_hist);
-    cudaFree(d_cdf);
-}
-
-int main3() {
-    cv::Mat inputImage = cv::imread("../imgs/lena_4k.jpg", cv::IMREAD_GRAYSCALE);
-    if (inputImage.empty()) {
-        std::cerr << "Error loading image!" << std::endl;
-        return -1;
-    }
-
-    histogramEqualizationCUDA(inputImage);
-
-    cv::imshow("Equalized Image", inputImage);
-    cv::waitKey(0);
-    cv::destroyAllWindows();
-    return 0;
-}
-
-#include <opencv2/opencv.hpp>
-#include <iostream>
-#include <cuda_runtime.h>
-
-#define BINS 256       // For grayscale images (0-255)
-#define TILE_W 32      // Tile width (and blockDim.x)
-#define TILE_H 32      // Tile height (and blockDim.y)
 
 __global__ void image_histogram_tiled(const unsigned char *image, int *globalHist, int width, int height) {
     // 2D indices within the block (tile)
@@ -191,6 +99,7 @@ __global__ void image_histogram_tiled(const unsigned char *image, int *globalHis
     }
 }
 
+
 int main() {
     // Load the grayscale image using OpenCV.
     cv::Mat img = cv::imread("../imgs/lena_4k.jpg", cv::IMREAD_GRAYSCALE);
@@ -203,22 +112,24 @@ int main() {
     int height = img.rows;
     int imgSize = width * height;
     
-    // Allocate host memory for histogram and initialize it to zero.
+    // Allocate host memory for histogram and CDF.
     std::vector<int> h_histogram(BINS, 0);
+    std::vector<int> h_cdf(BINS, 0);
     
     // Allocate device memory.
     unsigned char *d_image;
-    int *d_histogram;
-    cudaMalloc(&d_image, imgSize);
+    int *d_histogram, *d_cdf;
+    size_t pitch;
+    cudaMallocPitch(&d_image, &pitch, width * sizeof(unsigned char), height);
     cudaMalloc(&d_histogram, BINS * sizeof(int));
+    cudaMalloc(&d_cdf, BINS * sizeof(int));
     cudaMemset(d_histogram, 0, BINS * sizeof(int));
     
     // Copy image data to GPU.
-    cudaMemcpy(d_image, img.data, imgSize, cudaMemcpyHostToDevice);
+    cudaMemcpy2D(d_image, pitch, img.data, width * sizeof(unsigned char), width * sizeof(unsigned char), height, cudaMemcpyHostToDevice);
     
     // Define block and grid dimensions.
     dim3 blockDim(TILE_W, TILE_H);
-    // Calculate grid dimensions, ensuring we cover the entire image.
     dim3 gridDim((width + TILE_W - 1) / TILE_W, (height + TILE_H - 1) / TILE_H);
     
     // Launch the tiled histogram kernel.
@@ -228,14 +139,39 @@ int main() {
     // Copy the histogram back to the host.
     cudaMemcpy(h_histogram.data(), d_histogram, BINS * sizeof(int), cudaMemcpyDeviceToHost);
     
-    // Print out the histogram bins.
-    for (int i = 0; i < BINS; i++) {
-        std::cout << "Bin " << i << ": " << h_histogram[i] << std::endl;
+    // Compute CDF on the GPU.
+    computeCDF<<<1, BINS>>>(d_histogram, d_cdf, imgSize);
+    cudaMemcpy(h_cdf.data(), d_cdf, BINS * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // Find minimum nonzero CDF value.
+    int cdf_min = 0;
+    for (int i = 0; i < BINS; ++i) {
+        if (h_cdf[i] > 0) {
+            cdf_min = h_cdf[i];
+            break;
+        }
     }
+    
+    // Perform histogram equalization.
+    int threadsPerBlock = 256;
+    int numBlocks = (imgSize + threadsPerBlock - 1) / threadsPerBlock;
+    equalizeHistogram<<<numBlocks, threadsPerBlock>>>(d_image, pitch, d_cdf, width, height, cdf_min, imgSize);
+    cudaDeviceSynchronize();
+    
+    // Copy the equalized image back to the host.
+    cv::Mat equalized_img(height, width, CV_8UC1);
+    cudaMemcpy2D(equalized_img.data, width * sizeof(unsigned char), d_image, pitch, width * sizeof(unsigned char), height, cudaMemcpyDeviceToHost);
+    
+    // Save and display the result.
+    // cv::imwrite("equalized_image.jpg", equalized_img);
+    cv::imshow("Equalized Image", equalized_img);
+    cv::waitKey(0);
     
     // Cleanup.
     cudaFree(d_image);
     cudaFree(d_histogram);
+    cudaFree(d_cdf);
     
     return 0;
 }
+
