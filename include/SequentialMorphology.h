@@ -84,7 +84,7 @@ void sequentialTest(std::string img_path) {
     std::vector<cv::Size> resolutions = { 
         cv::Size(256, 256), 
         cv::Size(512, 512), 
-        cv::Size(1024, 1024) 
+        cv::Size(3840,2160) 
     };
     
     std::vector<std::string> operations = {"Erosion", "Dilation", "Opening", 

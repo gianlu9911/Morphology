@@ -52,7 +52,7 @@
 			"compileCommandFragments" : 
 			[
 				{
-					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -lineinfo -Xptxas -v -std=c++17 -arch=native -Xcompiler=-MD"
+					"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math --expt-relaxed-constexpr -lineinfo -Xptxas -v -std=c++17 -arch=native -Xcompiler=-MD"
 				}
 			],
 			"includes" : 
@@ -92,7 +92,7 @@
 		"commandFragments" : 
 		[
 			{
-				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math -lineinfo -Xptxas -v -arch=native -Xcompiler=-MD",
+				"fragment" : "-D_WINDOWS -Xcompiler=\" /EHsc\" -Xcompiler=\"-O2 -Ob2\" -DNDEBUG -O3 --use_fast_math --expt-relaxed-constexpr -lineinfo -Xptxas -v -arch=native -Xcompiler=-MD",
 				"role" : "flags"
 			},
 			{
